@@ -859,6 +859,45 @@ func ListRuns(ctx context.Context, nameWithOwner string) ([]Run, error) {
 	return runs, nil
 }
 
+// Workflow is an Actions workflow definition (`gh workflow list`).
+type Workflow struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	State string `json:"state"`
+	Path  string `json:"path"`
+}
+
+// ListWorkflows returns the repo's active Actions workflows.
+func ListWorkflows(ctx context.Context, nameWithOwner string) ([]Workflow, error) {
+	var wfs []Workflow
+	err := runJSON(ctx, &wfs,
+		"workflow", "list", "--repo", nameWithOwner, "--json", "id,name,state,path")
+	if err != nil {
+		return nil, err
+	}
+	return wfs, nil
+}
+
+// DefaultBranch returns the repo's default branch name.
+func DefaultBranch(ctx context.Context, nameWithOwner string) (string, error) {
+	out, err := run(ctx, "api", "repos/"+nameWithOwner, "--jq", ".default_branch")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// DispatchWorkflow triggers a workflow_dispatch run for a workflow on a ref.
+// Returns an error if the workflow has no workflow_dispatch trigger.
+func DispatchWorkflow(ctx context.Context, nameWithOwner string, workflowID int64, ref string) error {
+	args := []string{"workflow", "run", strconv.FormatInt(workflowID, 10), "--repo", nameWithOwner}
+	if ref != "" {
+		args = append(args, "--ref", ref)
+	}
+	_, err := run(ctx, args...)
+	return err
+}
+
 // GetRun returns the expanded detail (jobs + steps) for a single run.
 func GetRun(ctx context.Context, nameWithOwner string, runID int64) (RunDetail, error) {
 	var d RunDetail

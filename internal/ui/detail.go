@@ -40,6 +40,9 @@ type detailModel struct {
 	issueTable DataTable
 	secTable   DataTable
 
+	dispatch dispatchModel // "run a workflow" form (Workflows tab)
+	flash    string        // transient note (e.g. workflow dispatched)
+
 	allPRs        []gh.PR
 	runs          []gh.Run
 	issues        []gh.Issue
@@ -115,6 +118,7 @@ func newDetailModel(repo gh.Repo, login, account string, theme Theme) detailMode
 		runTable:      rt,
 		issueTable:    it,
 		secTable:      st,
+		dispatch:      newDispatchModel(theme),
 		onlyMyReviews: true,
 		loadingPRs:    true,
 		loadingRuns:   true,
@@ -139,6 +143,13 @@ func (m *detailModel) setSize(w, bodyH int) {
 	m.runTable.SetSize(w, th)
 	m.issueTable.SetSize(w, th)
 	m.secTable.SetSize(w, th)
+	m.dispatch.setSize(w, th)
+}
+
+// busy reports states in which the root must not steal q/esc (sort ribbon,
+// filter input, or the run-a-workflow form).
+func (m *detailModel) busy() bool {
+	return m.dispatch.active || m.activeTable().Sorting() || m.activeTable().Filtering()
 }
 
 func (m *detailModel) tableHeight() int {
@@ -363,14 +374,30 @@ func (m *detailModel) snapshot() Snapshot {
 		}
 		loaded = m.runLoaded
 	}
+	msg := ""
+	if m.active == tabWorkflows {
+		msg = m.flash
+	}
 	return Snapshot{
 		Profile:    m.account,
 		Region:     m.repo.NameWithOwner,
 		View:       tabNames[m.active],
 		Items:      items,
 		LastLoaded: loaded,
+		Message:    msg,
 		Live:       m.active == tabWorkflows && !m.loadingRuns && m.hasActiveRun(),
 	}
+}
+
+// dispatchDone records a workflow-dispatch result; on success it flashes a note
+// and reloads the runs list so the new run appears.
+func (m *detailModel) dispatchDone(name string, err error) tea.Cmd {
+	m.dispatch.finish(err)
+	if err != nil {
+		return nil
+	}
+	m.flash = "dispatched '" + name + "' ✓"
+	return loadRunsCmd(m.repo.NameWithOwner)
 }
 
 func (m *detailModel) helpSections() []helpSection {
@@ -382,6 +409,7 @@ func (m *detailModel) helpSections() []helpSection {
 		}},
 		{title: "Workflows tab", keys: []helpKey{
 			{"enter", "view run jobs & steps"},
+			{"r", "run a workflow (workflow_dispatch)"},
 			{"ctrl+o", "open run in browser"},
 		}},
 		{title: "Issues tab", keys: []helpKey{
@@ -402,10 +430,18 @@ func (m *detailModel) helpSections() []helpSection {
 
 func (m *detailModel) Update(msg tea.Msg) tea.Cmd {
 	if km, ok := msg.(tea.KeyMsg); ok {
+		// The run-a-workflow form captures all keys while open.
+		if m.dispatch.active {
+			return m.dispatch.Update(km)
+		}
 		// While the sort ribbon or filter input is up, all keys belong to the table.
 		at := m.activeTable()
 		if !at.Sorting() && !at.Filtering() {
 			switch km.String() {
+			case "r":
+				if m.active == tabWorkflows {
+					return m.dispatch.open(m.repo.NameWithOwner)
+				}
 			case "tab", "right", "l":
 				m.switchTab(1)
 				return nil
@@ -558,12 +594,14 @@ func (m *detailModel) subHeader() string {
 		}
 		return muted.Render(line)
 	default:
-		return muted.Render(fmt.Sprintf("recent runs · %d shown · enter details · / filter · ctrl+o browser · ctrl+f refresh", m.runTable.Len()))
+		return muted.Render(fmt.Sprintf("recent runs · %d shown · enter details · r run workflow · / filter · ctrl+o browser · ctrl+f refresh", m.runTable.Len()))
 	}
 }
 
 func (m *detailModel) body() string {
 	switch {
+	case m.active == tabWorkflows && m.dispatch.active:
+		return m.dispatch.View()
 	case m.active == tabPRs && m.prErr != nil:
 		return m.centered(errorStyle.Render("Failed to load PRs: " + m.prErr.Error()))
 	case m.active == tabPRs && m.loadingPRs:

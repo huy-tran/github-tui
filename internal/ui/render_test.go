@@ -1292,3 +1292,90 @@ func TestRepoVulnColumns(t *testing.T) {
 	}
 	assertLayout(t, m.View(), w, h)
 }
+
+func TestWorkflowDispatch(t *testing.T) {
+	const w, h = 100, 26
+	now := time.Now()
+	m := New(darkTheme)
+	m = step(t, m, tea.WindowSizeMsg{Width: w, Height: h})
+	m = step(t, m, userLoadedMsg{login: "octocat"})
+	m = step(t, m, reposLoadedMsg{repos: sampleRepos()})
+	m = step(t, m, key("enter"))
+	repo := m.detail.repo.NameWithOwner
+	m = step(t, m, prsLoadedMsg{repo: repo, prs: nil})
+	m = step(t, m, runsLoadedMsg{repo: repo, runs: []gh.Run{
+		{DatabaseID: 1, WorkflowName: "CI", Status: "completed", Conclusion: "success", CreatedAt: now, URL: "https://x/1"},
+	}})
+	m = step(t, m, issuesLoadedMsg{repo: repo, issues: nil})
+	m = step(t, m, securityLoadedMsg{repo: repo, unavailable: []string{"Dependabot", "code scanning", "secret scanning"}})
+	m = step(t, m, key("2")) // workflows tab
+
+	// 'r' opens the dispatch form and fires the info-load cmd.
+	nm, cmd := m.Update(key("r"))
+	m = nm.(Model)
+	if !m.detail.dispatch.active || cmd == nil {
+		t.Fatal("'r' should open the run-a-workflow form and load info")
+	}
+	// '?' must not open help while the form is up.
+	if m.canOpenHelp() {
+		t.Error("help should be blocked while the dispatch form is open")
+	}
+
+	// Workflows arrive (with a default branch).
+	m = step(t, m, dispatchInfoLoadedMsg{repo: repo, defaultBranch: "main", workflows: []gh.Workflow{
+		{ID: 10, Name: "CI", State: "active"},
+		{ID: 20, Name: "Deploy", State: "active"},
+	}})
+	out := m.View()
+	assertLayout(t, out, w, h)
+	t.Log("\nDispatch (pick):\n" + stripANSI(out))
+
+	// Move to "Deploy" and advance to the ref stage.
+	m = step(t, m, key("j"))
+	m = step(t, m, key("enter"))
+	if m.detail.dispatch.stage != dispatchRef {
+		t.Fatal("enter should advance to the ref stage")
+	}
+	if got := m.detail.dispatch.ref.Value(); got != "main" {
+		t.Errorf("ref should default to the repo default branch, got %q", got)
+	}
+	out = m.View()
+	assertLayout(t, out, w, h)
+	t.Log("\nDispatch (ref):\n" + stripANSI(out))
+
+	// enter triggers the dispatch (fires a gh cmd, sets working).
+	nm, cmd = m.Update(key("enter"))
+	m = nm.(Model)
+	if cmd == nil || !m.detail.dispatch.working {
+		t.Fatal("enter on the ref stage should dispatch the workflow")
+	}
+
+	// Success closes the form and flashes + reloads runs.
+	nm, cmd = m.Update(dispatchDoneMsg{repo: repo, name: "Deploy", err: nil})
+	m = nm.(Model)
+	if m.detail.dispatch.active {
+		t.Error("dispatch form should close on success")
+	}
+	if cmd == nil {
+		t.Error("success should reload the runs list")
+	}
+	if !strings.Contains(m.detail.flash, "Deploy") {
+		t.Errorf("expected a dispatched flash, got %q", m.detail.flash)
+	}
+
+	// Error keeps the form open with a message.
+	_ = step(t, m, key("r"))
+	m2 := step(t, m, key("r"))
+	m2 = step(t, m2, dispatchInfoLoadedMsg{repo: repo, defaultBranch: "main", workflows: []gh.Workflow{{ID: 10, Name: "CI"}}})
+	m2 = step(t, m2, key("enter")) // -> ref stage
+	nm, _ = m2.Update(key("enter"))
+	m2 = nm.(Model)
+	m2 = step(t, m2, dispatchDoneMsg{repo: repo, name: "CI", err: errFake("no workflow_dispatch trigger")})
+	if !m2.detail.dispatch.active || !m2.detail.dispatch.msgErr {
+		t.Error("a dispatch error should keep the form open and show the error")
+	}
+}
+
+type errFake string
+
+func (e errFake) Error() string { return string(e) }

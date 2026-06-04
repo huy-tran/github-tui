@@ -264,6 +264,40 @@ func loadPRsCmd(repo string) tea.Cmd {
 	}
 }
 
+type dispatchInfoLoadedMsg struct {
+	repo          string
+	workflows     []gh.Workflow
+	defaultBranch string
+	err           error
+}
+
+// dispatchDoneMsg reports the result of triggering a workflow.
+type dispatchDoneMsg struct {
+	repo string
+	name string
+	err  error
+}
+
+// loadDispatchInfoCmd fetches the repo's workflows and default branch for the
+// "run a workflow" form.
+func loadDispatchInfoCmd(repo string) tea.Cmd {
+	return func() tea.Msg {
+		wfs, err := gh.ListWorkflows(context.Background(), repo)
+		if err != nil {
+			return dispatchInfoLoadedMsg{repo: repo, err: err}
+		}
+		branch, _ := gh.DefaultBranch(context.Background(), repo) // best effort
+		return dispatchInfoLoadedMsg{repo: repo, workflows: wfs, defaultBranch: branch}
+	}
+}
+
+func dispatchWorkflowCmd(repo string, id int64, name, ref string) tea.Cmd {
+	return func() tea.Msg {
+		err := gh.DispatchWorkflow(context.Background(), repo, id, ref)
+		return dispatchDoneMsg{repo: repo, name: name, err: err}
+	}
+}
+
 func loadIssuesCmd(repo string) tea.Cmd {
 	return func() tea.Msg {
 		issues, err := gh.ListIssues(context.Background(), repo)

@@ -199,6 +199,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case dispatchInfoLoadedMsg:
+		if m.screen == screenDetail && msg.repo == m.detail.repo.NameWithOwner {
+			m.detail.dispatch.setInfo(msg.workflows, msg.defaultBranch, msg.err)
+		}
+		return m, nil
+
+	case dispatchDoneMsg:
+		if m.screen == screenDetail && msg.repo == m.detail.repo.NameWithOwner {
+			return m, m.detail.dispatchDone(msg.name, msg.err)
+		}
+		return m, nil
+
 	case openIssueMsg:
 		m.issueDetail = newIssueDetailModel(msg.repo, msg.issue, m.login, m.theme)
 		m.issueDetail.setSize(m.width, m.bodyHeight())
@@ -452,8 +464,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.repos.Update(msg)
 
 	case screenDetail:
-		at := m.detail.activeTable()
-		if !at.Sorting() && !at.Filtering() {
+		if !m.detail.busy() {
 			switch msg.String() {
 			case "q":
 				return m, tea.Quit
@@ -751,6 +762,9 @@ func (m *Model) canOpenHelp() bool {
 		return false
 	}
 	if m.screen == screenNotifs && m.notifs.pendingMarkAll {
+		return false
+	}
+	if m.screen == screenDetail && m.detail.dispatch.active {
 		return false
 	}
 	return true
