@@ -1,0 +1,15 @@
+# Built binaries
+/github-tui
+/github-tui.exe
+/gh-tui
+/gh-tui.exe
+
+# Go test/build artifacts
+*.test
+*.out
+coverage.*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
