@@ -963,6 +963,44 @@ func GetPR(ctx context.Context, nameWithOwner string, number int) (PRDetail, err
 	return d, nil
 }
 
+// MentionableUsers returns the logins of users who can be @-mentioned in the
+// repo (collaborators and, for org repos, members), via the GraphQL
+// mentionableUsers connection. It's capped at the first 100 - more than enough
+// candidates for an autocomplete - and returned in GitHub's own relevance
+// order.
+func MentionableUsers(ctx context.Context, nameWithOwner string) ([]string, error) {
+	owner, name, ok := strings.Cut(nameWithOwner, "/")
+	if !ok {
+		return nil, fmt.Errorf("invalid repo %q", nameWithOwner)
+	}
+	const query = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mentionableUsers(first:100){nodes{login}}}}`
+	raw, err := run(ctx, "api", "graphql",
+		"-f", "query="+query, "-f", "owner="+owner, "-f", "name="+name)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Data struct {
+			Repository struct {
+				MentionableUsers struct {
+					Nodes []user `json:"nodes"`
+				} `json:"mentionableUsers"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("decoding mentionableUsers: %w", err)
+	}
+	nodes := resp.Data.Repository.MentionableUsers.Nodes
+	logins := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		if n.Login != "" {
+			logins = append(logins, n.Login)
+		}
+	}
+	return logins, nil
+}
+
 // GetPRDiff returns the unified diff for a pull request.
 func GetPRDiff(ctx context.Context, nameWithOwner string, number int) (string, error) {
 	out, err := run(ctx, "pr", "diff", strconv.Itoa(number), "--repo", nameWithOwner)

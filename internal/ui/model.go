@@ -278,6 +278,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case mentionUsersLoadedMsg:
+		if m.screen == screenPRDetail && msg.repo == m.prDetail.repo {
+			m.prDetail.setMentionUsers(msg.logins)
+		}
+		return m, nil
+
 	case errMsg:
 		m.applyErr(msg)
 		return m, nil

@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor/patch only).
 
+## v0.0.12
+- **@-mention autocomplete** in the PR review composer (`ctrl+r`): typing `@`
+  opens a picker of PR participants first, then the repo's mentionable users;
+  `↑/↓` select, `tab`/`enter` insert, `esc` dismisses.
+
+## v0.0.11
+- Trigger workflows (`workflow_dispatch`) directly from the Workflows tab.
+
 ## v0.0.10
 - Keybinding consistency: `ctrl+o` is the single "open in browser" key on every
   screen; `enter` only drills into a detail screen. On the Security tab and for

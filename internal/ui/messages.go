@@ -148,6 +148,13 @@ type prActionDoneMsg struct {
 	err    error
 }
 
+// mentionUsersLoadedMsg carries the repo's @-mentionable users for the review
+// composer's autocomplete.
+type mentionUsersLoadedMsg struct {
+	repo   string
+	logins []string
+}
+
 // errMsg carries an error and the logical context it occurred in.
 type errMsg struct {
 	context string
@@ -405,6 +412,18 @@ func closePRCmd(repo string, number int) tea.Cmd {
 	return func() tea.Msg {
 		err := gh.ClosePR(context.Background(), repo, number)
 		return prActionDoneMsg{repo: repo, number: number, action: "close", err: err}
+	}
+}
+
+// loadMentionUsersCmd fetches the repo's @-mentionable users for the composer.
+// A failure is non-fatal: the picker simply stays empty.
+func loadMentionUsersCmd(repo string) tea.Cmd {
+	return func() tea.Msg {
+		logins, err := gh.MentionableUsers(context.Background(), repo)
+		if err != nil {
+			return mentionUsersLoadedMsg{repo: repo}
+		}
+		return mentionUsersLoadedMsg{repo: repo, logins: logins}
 	}
 }
 

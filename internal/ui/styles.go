@@ -12,7 +12,7 @@ import (
 // App identity shown in the top bar.
 const (
 	AppName = "Github - TUI"
-	Version = "v0.0.11" // empty or "dev" => render bare app name
+	Version = "v0.0.12" // empty or "dev" => render bare app name
 )
 
 // Fixed semantic colors — identical on light and dark backgrounds. Only the

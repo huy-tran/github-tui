@@ -587,6 +587,53 @@ func TestPRReviewCompose(t *testing.T) {
 	}
 }
 
+func TestPRMentionPicker(t *testing.T) {
+	const w, h = 100, 30
+	m, repo := openPRDetail(t, w, h)
+	m = step(t, m, prDetailLoadedMsg{repo: repo, number: 165, detail: gh.PRDetail{
+		Number: 165, Title: "Fix the thing", State: "OPEN", BaseRefName: "master", HeadRefName: "fix",
+	}})
+	// Repo mentionable users arrive from the lazy fetch.
+	m = step(t, m, mentionUsersLoadedMsg{repo: repo, logins: []string{"alice", "bob", "alfred"}})
+
+	// Open the composer and choose "comment".
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = step(t, m, key("c"))
+	if !m.prDetail.composeTyping {
+		t.Fatal("expected typing stage")
+	}
+
+	// Typing "@al" opens the picker, matching alice + alfred by prefix.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("@al")})
+	if !m.prDetail.mentioning {
+		t.Fatal("expected mention picker open after typing @al")
+	}
+	if got := m.prDetail.mentionMatches; len(got) != 2 || got[0] != "alice" || got[1] != "alfred" {
+		t.Fatalf("matches = %v, want [alice alfred]", got)
+	}
+	if !strings.Contains(stripANSI(m.View()), "@alfred") {
+		t.Error("expected candidate list rendered in body")
+	}
+
+	// Down selects alfred; enter inserts it and closes the picker.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = step(t, m, key("enter"))
+	if m.prDetail.mentioning {
+		t.Fatal("picker should close after accepting")
+	}
+	if got := m.prDetail.input.Value(); got != "@alfred " {
+		t.Fatalf("input = %q, want %q", got, "@alfred ")
+	}
+
+	// With the picker closed, enter now submits the review.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("thanks")})
+	nm, cmd := m.Update(key("enter"))
+	m = nm.(Model)
+	if cmd == nil || m.prDetail.composing {
+		t.Fatal("expected enter to submit once the picker is closed")
+	}
+}
+
 func TestMyPRsDashboard(t *testing.T) {
 	const w, h = 110, 30
 	now := time.Now()

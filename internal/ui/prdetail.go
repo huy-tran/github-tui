@@ -67,6 +67,14 @@ type prDetailModel struct {
 	composeKind   gh.ReviewKind
 	input         textinput.Model
 
+	// @-mention autocomplete within the composer.
+	mentionUsers   []string // repo mentionable users (fetched once, lazily)
+	mentionFetched bool     // fetch has been kicked off
+	mentioning     bool     // the picker is currently open
+	mentionMatches []string // candidates for the active query (participants first)
+	mentionIndex   int      // selected candidate
+	mentionStart   int      // rune index of the '@' that opened the picker
+
 	width  int
 	height int
 }
@@ -178,7 +186,7 @@ func (m *prDetailModel) helpSections() []helpSection {
 			{"tab / ← →", "switch Info / Diff / Conversation"},
 			{"ctrl+d", "jump to diff"},
 			{"ctrl+a", "approve"},
-			{"ctrl+r", "request changes / comment"},
+			{"ctrl+r", "request changes / comment (@ to mention)"},
 			{"ctrl+y", "merge (then pick method)"},
 			{"ctrl+x", "close without merging"},
 			{"ctrl+o", "open in browser"},
@@ -217,8 +225,7 @@ func (m *prDetailModel) Update(msg tea.Msg) tea.Cmd {
 			m.beginApprove()
 			return nil
 		case "ctrl+r":
-			m.beginReview()
-			return nil
+			return m.beginReview()
 		case "ctrl+y":
 			// Not ctrl+m: terminals send carriage return for Ctrl+M, which is
 			// indistinguishable from Enter. ctrl+y is a distinct control code.
@@ -340,21 +347,36 @@ func (m *prDetailModel) beginClose() {
 	m.pending = prActionClose
 }
 
-func (m *prDetailModel) beginReview() {
+func (m *prDetailModel) beginReview() tea.Cmd {
 	if !m.isOpen() {
 		m.flash(fmt.Sprintf("PR is %s - cannot review", m.stateText()), true)
-		return
+		return nil
 	}
 	m.composing = true
 	m.composeTyping = false
 	m.composeKind = ""
 	m.input.Reset()
+	// Fetch the mentionable-user list once, the first time anyone composes.
+	if !m.mentionFetched {
+		m.mentionFetched = true
+		return loadMentionUsersCmd(m.repo)
+	}
+	return nil
 }
 
+// setMentionUsers records the repo's @-mentionable users for the picker.
+func (m *prDetailModel) setMentionUsers(logins []string) { m.mentionUsers = logins }
+
 // handleComposeKey drives the review composer: first pick a kind, then type the
-// body and submit with enter (esc cancels at any point).
+// body and submit with enter (esc cancels at any point). While typing, an
+// @-mention picker can open and intercept navigation/accept keys.
 func (m *prDetailModel) handleComposeKey(km tea.KeyMsg, raw tea.Msg) tea.Cmd {
 	if km.String() == "esc" {
+		// First esc closes an open mention picker; the next cancels the composer.
+		if m.mentioning {
+			m.mentioning = false
+			return nil
+		}
 		m.cancelCompose()
 		return nil
 	}
@@ -372,7 +394,21 @@ func (m *prDetailModel) handleComposeKey(km tea.KeyMsg, raw tea.Msg) tea.Cmd {
 		m.input.Focus()
 		return textinput.Blink
 	}
-	// Typing the body.
+	// Typing the body. While the picker is open it owns navigation and accept.
+	if m.mentioning {
+		switch km.String() {
+		case "up", "ctrl+p":
+			m.moveMention(-1)
+			return nil
+		case "down", "ctrl+n":
+			m.moveMention(1)
+			return nil
+		case "tab", "enter":
+			m.acceptMention()
+			return nil
+		}
+	}
+	// Enter submits the review when no picker is open.
 	if km.String() == "enter" {
 		body := strings.TrimSpace(m.input.Value())
 		if body == "" {
@@ -384,16 +420,122 @@ func (m *prDetailModel) handleComposeKey(km tea.KeyMsg, raw tea.Msg) tea.Cmd {
 		m.actionMsg = ""
 		return reviewPRCmd(m.repo, m.pr.Number, kind, body)
 	}
+	// Edit the input, then recompute the picker from the new value + cursor.
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(raw)
+	m.updateMention()
 	return cmd
 }
 
 func (m *prDetailModel) cancelCompose() {
 	m.composing = false
 	m.composeTyping = false
+	m.mentioning = false
 	m.input.Blur()
 	m.input.Reset()
+}
+
+const maxMentionMatches = 8
+
+// isMentionChar reports whether r can appear in a GitHub login.
+func isMentionChar(r rune) bool {
+	return r == '-' ||
+		(r >= 'a' && r <= 'z') ||
+		(r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9')
+}
+
+// updateMention recomputes the picker from the input value and cursor. It opens
+// when the cursor sits in an "@token" run that begins at the start of the input
+// or just after whitespace; otherwise it stays closed.
+func (m *prDetailModel) updateMention() {
+	val := []rune(m.input.Value())
+	pos := min(m.input.Position(), len(val))
+	// Walk back over login characters to find the run's start.
+	i := pos
+	for i > 0 && isMentionChar(val[i-1]) {
+		i--
+	}
+	// Need an '@' immediately before the run, at the start or after a space, so
+	// emails (foo@bar) don't trigger the picker.
+	if i == 0 || val[i-1] != '@' || (i >= 2 && val[i-2] != ' ') {
+		m.mentioning = false
+		return
+	}
+	matches := m.mentionCandidates(string(val[i:pos]))
+	if len(matches) == 0 {
+		m.mentioning = false
+		return
+	}
+	m.mentioning = true
+	m.mentionMatches = matches
+	m.mentionStart = i - 1
+	m.mentionIndex = 0
+}
+
+// mentionCandidates returns up to maxMentionMatches logins whose name has the
+// query as a (case-insensitive) prefix, PR participants ranked first.
+func (m *prDetailModel) mentionCandidates(query string) []string {
+	q := strings.ToLower(query)
+	seen := map[string]bool{}
+	var out []string
+	add := func(logins []string) {
+		for _, l := range logins {
+			if l == "" || len(out) >= maxMentionMatches {
+				continue
+			}
+			key := strings.ToLower(l)
+			if seen[key] || (q != "" && !strings.HasPrefix(key, q)) {
+				continue
+			}
+			seen[key] = true
+			out = append(out, l)
+		}
+	}
+	add(m.participantLogins())
+	add(m.mentionUsers)
+	return out
+}
+
+// participantLogins lists everyone already involved in the PR: author,
+// requested reviewers, and review/comment authors.
+func (m *prDetailModel) participantLogins() []string {
+	var out []string
+	out = append(out, m.detail.AuthorLogin())
+	out = append(out, m.pr.ReviewerLogins()...)
+	for _, r := range m.detail.Reviews {
+		out = append(out, r.AuthorLogin())
+	}
+	for _, c := range m.detail.Comments {
+		out = append(out, c.AuthorLogin())
+	}
+	return out
+}
+
+func (m *prDetailModel) moveMention(delta int) {
+	n := len(m.mentionMatches)
+	if n == 0 {
+		return
+	}
+	m.mentionIndex = (m.mentionIndex + delta + n) % n
+}
+
+// acceptMention replaces the typed "@token" with the selected "@login " and
+// closes the picker.
+func (m *prDetailModel) acceptMention() {
+	if m.mentionIndex < 0 || m.mentionIndex >= len(m.mentionMatches) {
+		m.mentioning = false
+		return
+	}
+	val := []rune(m.input.Value())
+	pos := min(m.input.Position(), len(val))
+	repl := []rune("@" + m.mentionMatches[m.mentionIndex] + " ")
+	next := append([]rune{}, val[:m.mentionStart]...)
+	next = append(next, repl...)
+	next = append(next, val[pos:]...)
+	m.input.SetValue(string(next))
+	m.input.SetCursor(m.mentionStart + len(repl))
+	m.mentioning = false
 }
 
 func (m *prDetailModel) handleConfirmKey(km tea.KeyMsg) tea.Cmd {
@@ -546,7 +688,7 @@ func (m *prDetailModel) promptLine(muted lipgloss.Style) string {
 		if m.composeKind == gh.ReviewRequestChanges {
 			label = "Request changes"
 		}
-		return accentStyle.Bold(true).Render(label+": ") + m.input.View() + muted.Render("   enter submit · esc cancel")
+		return accentStyle.Bold(true).Render(label+": ") + m.input.View() + muted.Render("   enter submit · @ mention · esc cancel")
 	}
 	switch m.pending {
 	case prActionApprove:
@@ -578,9 +720,28 @@ func (m *prDetailModel) body() string {
 		return m.centered(errorStyle.Render("Failed to load diff: " + m.diffErr.Error()))
 	case m.view == prViewDiff && m.diffLoading:
 		return m.centered(mutedStyleFor(m.theme).Render("loading diff…"))
+	case m.composing && m.mentioning:
+		// Show the candidate list just below the composer input.
+		return lipgloss.Place(maxInt(m.width, 1), m.vpHeight(),
+			lipgloss.Left, lipgloss.Top, m.renderMentionPopup())
 	default:
 		return m.vp.View()
 	}
+}
+
+// renderMentionPopup builds the @-mention candidate list.
+func (m *prDetailModel) renderMentionPopup() string {
+	muted := mutedStyleFor(m.theme)
+	sel := lipgloss.NewStyle().Bold(true).Foreground(colorTitleFg).Background(colorAccent)
+	lines := []string{muted.Render("Mention a user  ·  ↑/↓ select · tab/enter insert · esc dismiss"), ""}
+	for i, login := range m.mentionMatches {
+		if i == m.mentionIndex {
+			lines = append(lines, sel.Render(" ▸ @"+login+" "))
+		} else {
+			lines = append(lines, "   @"+login)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *prDetailModel) centered(s string) string {
