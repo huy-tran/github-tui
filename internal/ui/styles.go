@@ -12,7 +12,7 @@ import (
 // App identity shown in the top bar.
 const (
 	AppName = "Github - TUI"
-	Version = "v0.0.12" // empty or "dev" => render bare app name
+	Version = "v0.0.13" // empty or "dev" => render bare app name
 )
 
 // Fixed semantic colors — identical on light and dark backgrounds. Only the
@@ -81,8 +81,16 @@ var (
 	textStyle   = lipgloss.NewStyle().Foreground(colorText)
 )
 
-// humanizeDuration renders a friendly "time ago" for table cells.
-func humanizeDuration(t time.Time) string {
+// humanizeTime is the shared timestamp convention for item dates across the
+// tool (list cells, detail headers, comments). It renders recent times
+// relatively ("just now", "3h ago", "2d ago") but switches to an absolute
+// date+time once the timestamp is older than three days. Beyond a couple of
+// days "5d ago" is hard to map back to a calendar date (weekends especially),
+// so the concrete date is more useful than the relative one.
+//
+// Note: data-load freshness in the status bar deliberately stays relative
+// (see freshness); it reflects how stale the loaded view is, not an item date.
+func humanizeTime(t time.Time) string {
 	if t.IsZero() {
 		return "never"
 	}
@@ -94,17 +102,20 @@ func humanizeDuration(t time.Time) string {
 		return fmt.Sprintf("%dm ago", int(d.Minutes()))
 	case d < 24*time.Hour:
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	case d < 30*24*time.Hour:
+	case d < 3*24*time.Hour:
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	case d < 365*24*time.Hour:
-		return fmt.Sprintf("%dmo ago", int(d.Hours()/24/30))
-	default:
-		return fmt.Sprintf("%dy ago", int(d.Hours()/24/365))
 	}
+	local := t.Local()
+	if local.Year() == time.Now().Year() {
+		return local.Format("Jan 2, 15:04")
+	}
+	return local.Format("Jan 2 2006, 15:04")
 }
 
-// freshness renders the short relative units used by the status footer:
-// "12s ago", "4m ago", "2h ago", "3d ago".
+// freshness renders the short relative units used by the status footer to show
+// how stale the loaded view is: "12s ago", "4m ago", "2h ago", "3d ago". It
+// stays purely relative (unlike humanizeTime) because it tracks data freshness,
+// not an item date - the loaded view is effectively always recent.
 func freshness(t time.Time) string {
 	if t.IsZero() {
 		return "never"

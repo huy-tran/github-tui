@@ -106,7 +106,7 @@ func (m *myPRsModel) rebuild() {
 		}
 		rows[i] = []string{
 			p.RepoName(), "#" + strconv.Itoa(p.Number), title,
-			"@" + p.Author.Login, roleCell(it.role, muted), humanizeDuration(p.UpdatedAt),
+			"@" + p.Author.Login, roleCell(it.role, muted), humanizeTime(p.UpdatedAt),
 		}
 		keys[i] = []string{
 			p.RepoName(), strconv.Itoa(p.Number), p.Title,

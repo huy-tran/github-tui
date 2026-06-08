@@ -246,7 +246,7 @@ func (m *issueDetailModel) header() string {
 			issueStateBadge(m.detail.State),
 			"@" + m.detail.Author.Login,
 			labelStr,
-			freshness(m.detail.UpdatedAt),
+			humanizeTime(m.detail.UpdatedAt),
 		}, muted.Render("  ·  "))
 	}
 
@@ -317,7 +317,7 @@ func (m *issueDetailModel) renderBody() string {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		b.WriteString(lipgloss.NewStyle().Bold(true).Render("@"+c.Author.Login) + muted.Render("  "+freshness(c.CreatedAt)) + "\n")
+		b.WriteString(lipgloss.NewStyle().Bold(true).Render("@"+c.Author.Login) + muted.Render("  "+humanizeTime(c.CreatedAt)) + "\n")
 		if body := strings.TrimSpace(c.Body); body != "" {
 			b.WriteString(indentLines(wrap(body), "  ") + "\n")
 		}

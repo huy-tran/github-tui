@@ -198,7 +198,7 @@ func (m *detailModel) rebuildPRs() {
 		}
 		rows = append(rows, []string{
 			"#" + strconv.Itoa(pr.Number), title, "@" + pr.Author.Login,
-			reviewers, humanizeDuration(pr.UpdatedAt),
+			reviewers, humanizeTime(pr.UpdatedAt),
 		})
 		keys = append(keys, []string{
 			strconv.Itoa(pr.Number), pr.Title, pr.Author.Login,
@@ -230,7 +230,7 @@ func (m *detailModel) setRuns(runs []gh.Run) {
 		if name == "" {
 			name = r.DisplayTitle
 		}
-		rows[i] = []string{status, name, r.HeadBranch, r.Event, humanizeDuration(r.CreatedAt)}
+		rows[i] = []string{status, name, r.HeadBranch, r.Event, humanizeTime(r.CreatedAt)}
 		statusKey := r.Conclusion
 		if r.Status != "completed" {
 			statusKey = r.Status
@@ -264,7 +264,7 @@ func (m *detailModel) setIssues(issues []gh.Issue) {
 		}
 		rows[i] = []string{
 			"#" + strconv.Itoa(is.Number), is.Title, "@" + is.Author.Login,
-			labelStr, humanizeDuration(is.UpdatedAt),
+			labelStr, humanizeTime(is.UpdatedAt),
 		}
 		keys[i] = []string{
 			strconv.Itoa(is.Number), is.Title, is.Author.Login,
@@ -296,7 +296,7 @@ func (m *detailModel) setSecurity(alerts []gh.SecurityAlert, unavailable []strin
 		}
 		rows[i] = []string{
 			securitySeverityCell(a.Severity), securitySourceCell(a.Source),
-			a.Detail, loc, humanizeDuration(a.CreatedAt),
+			a.Detail, loc, humanizeTime(a.CreatedAt),
 		}
 		keys[i] = []string{
 			strconv.Itoa(gh.SeverityRank(a.Severity)), a.Source, a.Detail,

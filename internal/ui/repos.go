@@ -129,7 +129,7 @@ func (m *reposModel) rebuild() {
 			m.vulnCell(vc.High, colorRed, vc.Known),
 			m.vulnCell(vc.Medium, colorAccent, vc.Known),
 			m.vulnCell(vc.Low, colorYellow, vc.Known),
-			humanizeDuration(r.Activity()),
+			humanizeTime(r.Activity()),
 		}
 		keys[i] = []string{
 			r.NameWithOwner, vis,

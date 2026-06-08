@@ -283,14 +283,14 @@ func (m *prDetailModel) renderConversation() string {
 	for _, r := range m.detail.Reviews {
 		entries = append(entries, entry{
 			when: r.SubmittedAt,
-			head: reviewStateText(r.State) + "  @" + r.Author.Login + muted.Render("  "+freshness(r.SubmittedAt)),
+			head: reviewStateText(r.State) + "  @" + r.Author.Login + muted.Render("  "+humanizeTime(r.SubmittedAt)),
 			body: strings.TrimSpace(r.Body),
 		})
 	}
 	for _, c := range m.detail.Comments {
 		entries = append(entries, entry{
 			when: c.CreatedAt,
-			head: lipgloss.NewStyle().Bold(true).Render("@"+c.Author.Login) + muted.Render("  commented  "+freshness(c.CreatedAt)),
+			head: lipgloss.NewStyle().Bold(true).Render("@"+c.Author.Login) + muted.Render("  commented  "+humanizeTime(c.CreatedAt)),
 			body: strings.TrimSpace(c.Body),
 		})
 	}
@@ -645,7 +645,7 @@ func (m *prDetailModel) header() string {
 			m.detail.BaseRefName + " ← " + m.detail.HeadRefName,
 			adds + " " + dels,
 			fmt.Sprintf("%d files", m.detail.ChangedFiles),
-			freshness(m.detail.UpdatedAt),
+			humanizeTime(m.detail.UpdatedAt),
 		}, muted.Render("  ·  "))
 	}
 

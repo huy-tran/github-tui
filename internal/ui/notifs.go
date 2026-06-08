@@ -117,7 +117,7 @@ func (m *notifsModel) rebuild() {
 			notifTypeCell(n.Subject.Type),
 			muted.Render(humanizeReason(n.Reason)),
 			n.Subject.Title,
-			humanizeDuration(n.UpdatedAt),
+			humanizeTime(n.UpdatedAt),
 		}
 		keys[i] = []string{
 			n.RepoName(), n.Subject.Type, n.Reason, n.Subject.Title,

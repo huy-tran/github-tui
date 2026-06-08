@@ -129,7 +129,7 @@ func (m *runDetailModel) rebuild() {
 			jobName,
 			runStatusIcon(job.Status, job.Conclusion) + " " + runStatusCell(job.Status, job.Conclusion),
 			dispDur,
-			humanizeDuration(job.StartedAt),
+			humanizeTime(job.StartedAt),
 		})
 		keys = append(keys, []string{
 			job.Name, jobStatusKey(job.Status, job.Conclusion),
@@ -143,7 +143,7 @@ func (m *runDetailModel) rebuild() {
 				muted.Render("  └ " + st.Name),
 				runStatusIcon(st.Status, st.Conclusion) + " " + runStatusCell(st.Status, st.Conclusion),
 				d2,
-				humanizeDuration(st.StartedAt),
+				humanizeTime(st.StartedAt),
 			})
 			keys = append(keys, []string{
 				st.Name, jobStatusKey(st.Status, st.Conclusion),
@@ -403,7 +403,7 @@ func (m *runDetailModel) header() string {
 			m.detail.HeadBranch,
 			"on " + m.detail.Event,
 			dispDur,
-			freshness(m.detail.CreatedAt),
+			humanizeTime(m.detail.CreatedAt),
 			sha,
 		}, muted.Render("  ·  "))
 	}
