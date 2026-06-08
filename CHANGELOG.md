@@ -3,11 +3,16 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor/patch only).
 
+## v0.0.14
+- Absolute timestamps now append the local zone abbreviation (e.g.
+  `Jun 2, 14:30 AEST`) so the time is unambiguous.
+
 ## v0.0.13
 - Timestamps now switch from relative to an absolute date once an item is older
-  than three days (e.g. `2d ago`, then `Jun 2, 14:30`; prior years include the
-  year). Applies across every list, detail header, and comment/review; the
-  status-bar "loaded ... ago" stays relative since it tracks data freshness.
+  than three days (e.g. `2d ago`, then `Jun 2, 14:30`; absolute dates show in
+  local time, and prior years include the year). Applies across every list,
+  detail header, and comment/review; the status-bar "loaded ... ago" stays
+  relative since it tracks data freshness.
 
 ## v0.0.12
 - **@-mention autocomplete** in the PR review composer (`ctrl+r`): typing `@`

@@ -12,7 +12,7 @@ import (
 // App identity shown in the top bar.
 const (
 	AppName = "Github - TUI"
-	Version = "v0.0.13" // empty or "dev" => render bare app name
+	Version = "v0.0.14" // empty or "dev" => render bare app name
 )
 
 // Fixed semantic colors — identical on light and dark backgrounds. Only the
@@ -107,9 +107,9 @@ func humanizeTime(t time.Time) string {
 	}
 	local := t.Local()
 	if local.Year() == time.Now().Year() {
-		return local.Format("Jan 2, 15:04")
+		return local.Format("Jan 2, 15:04 MST")
 	}
-	return local.Format("Jan 2 2006, 15:04")
+	return local.Format("Jan 2 2006, 15:04 MST")
 }
 
 // freshness renders the short relative units used by the status footer to show
