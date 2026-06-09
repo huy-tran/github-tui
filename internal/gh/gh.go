@@ -278,16 +278,53 @@ type apiRepo struct {
 //
 // It uses the /user/repos API rather than `gh repo list` because the latter
 // only returns repositories owned by the account.
-func ListRepos(ctx context.Context) ([]Repo, error) {
+// ListRepos returns accessible repositories, newest-push first.
+//
+// When all is false (the default scoped view) it fetches only repos you own or
+// directly collaborate on, a single page (no --paginate), which keeps the set
+// small and the cross-repo scans cheap. When all is true it returns every
+// accessible repo - owned, collaborator, and organization-member - across all
+// pages, for the "show all" discovery view.
+func ListRepos(ctx context.Context, all bool) ([]Repo, error) {
+	args := []string{"api"}
+	if all {
+		args = append(args, "--paginate",
+			"/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member&visibility=all")
+	} else {
+		args = append(args,
+			"/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator&visibility=all")
+	}
 	var apiRepos []apiRepo
-	err := runJSON(ctx, &apiRepos,
-		"api", "--paginate",
-		"/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member&visibility=all",
-	)
-	if err != nil {
+	if err := runJSON(ctx, &apiRepos, args...); err != nil {
 		return nil, err
 	}
+	repos := reposFromAPI(apiRepos)
+	sort.SliceStable(repos, func(i, j int) bool {
+		return repos[i].activity().After(repos[j].activity())
+	})
+	return repos, nil
+}
 
+// GetRepos fetches specific repositories by "owner/name" (used to load pinned
+// repos that fall outside the scoped list). Repos that error are omitted.
+func GetRepos(ctx context.Context, names []string) []Repo {
+	var out []Repo
+	for _, nwo := range names {
+		owner, name, ok := strings.Cut(nwo, "/")
+		if !ok {
+			continue
+		}
+		var r apiRepo
+		if err := runJSON(ctx, &r, "api", fmt.Sprintf("repos/%s/%s", owner, name)); err != nil {
+			continue
+		}
+		out = append(out, reposFromAPI([]apiRepo{r})...)
+	}
+	return out
+}
+
+// reposFromAPI maps the snake_case API shape to the domain Repo type.
+func reposFromAPI(apiRepos []apiRepo) []Repo {
 	repos := make([]Repo, len(apiRepos))
 	for i, r := range apiRepos {
 		repos[i] = Repo{
@@ -299,10 +336,7 @@ func ListRepos(ctx context.Context) ([]Repo, error) {
 			UpdatedAt:     r.UpdatedAt,
 		}
 	}
-	sort.SliceStable(repos, func(i, j int) bool {
-		return repos[i].activity().After(repos[j].activity())
-	})
-	return repos, nil
+	return repos
 }
 
 // activity is the timestamp used for ordering repos: the most recent of push

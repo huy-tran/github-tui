@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor/patch only).
 
+## v0.0.16
+- Repo list is now **scoped by default**: only repos you own or directly
+  collaborate on, showing the 50 most recently active (plus any pinned). Avoids
+  loading and scanning every accessible repo. Press `a` to toggle the full
+  org-inclusive "show all" view.
+- **Pin repos** with `*`: pinned repos get a ★, sort to the top, persist across
+  sessions, and always show - even org repos outside the scoped filter.
+- Vulnerability (`v`) and last-committer (`c`) scans now cover only the visible
+  set, so cross-repo ranking reflects the repos you actually manage.
+
 ## v0.0.15
 - Per-repo **Commits tab**: recent commits on the default branch (SHA, message,
   author, when), fuzzy-filterable and sortable; `ctrl+o` opens a commit on

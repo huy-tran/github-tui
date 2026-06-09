@@ -140,6 +140,53 @@ func WriteLastCommits(commits map[string]gh.LastCommit) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
+// pinsCache is the on-disk shape for the user's pinned repositories.
+type pinsCache struct {
+	Pins []string `json:"pins"` // "owner/name", in pin order
+}
+
+func pinsPath() (string, error) {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "gh-tui", "pins.json"), nil
+}
+
+// ReadPins returns the pinned repositories ("owner/name"). A missing or
+// unreadable file returns nil with no error.
+func ReadPins() ([]string, error) {
+	path, err := pinsPath()
+	if err != nil {
+		return nil, err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil
+	}
+	var c pinsCache
+	if err := json.Unmarshal(b, &c); err != nil {
+		return nil, nil
+	}
+	return c.Pins, nil
+}
+
+// WritePins persists the pinned repositories.
+func WritePins(pins []string) error {
+	path, err := pinsPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.Marshal(pinsCache{Pins: pins})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0o644)
+}
+
 // WriteRepos persists the repository list with the current timestamp.
 func WriteRepos(repos []gh.Repo) error {
 	path, err := reposPath()

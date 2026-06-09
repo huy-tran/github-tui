@@ -9,10 +9,19 @@ import (
 	"github.com/huy-tran/github-tui/internal/gh"
 )
 
+// scopedRepoLimit caps how many non-pinned repos the scoped view keeps (the
+// most recently active ones). Pinned repos are always shown on top of this.
+const scopedRepoLimit = 50
+
 // reposModel is the first screen: a filterable, sortable repo table.
 type reposModel struct {
 	table DataTable
-	repos []gh.Repo // full set, source order (by activity)
+	repos []gh.Repo // loaded set, source order (by activity)
+
+	pins       []string        // pinned "owner/name", in pin order (persisted)
+	pinSet     map[string]bool // membership lookup for pins
+	pinsLoaded bool            // pins have been read from disk
+	showAll    bool            // true => full org-inclusive set; false => scoped
 
 	vulns         map[string]gh.VulnCounts // per-repo alert counts (cached; rescanned on 'v')
 	vulnsLoaded   bool                     // have counts (from cache or a scan)
@@ -68,14 +77,89 @@ func (m *reposModel) tableHeight() int {
 	return m.height - 2
 }
 
-// setRepos applies authoritative network data.
-func (m *reposModel) setRepos(repos []gh.Repo) {
+// setRepos applies authoritative network data. all reports whether this is the
+// full "show all" set (vs the scoped owner/collaborator set).
+func (m *reposModel) setRepos(repos []gh.Repo, all bool) {
 	m.repos = repos
+	m.showAll = all
 	m.loading = false
 	m.fresh = true
 	m.refreshing = false
 	m.lastLoaded = time.Now()
 	m.rebuild()
+}
+
+// setPins stores the pinned-repo list (from disk) and refreshes ordering.
+func (m *reposModel) setPins(pins []string) {
+	m.pins = pins
+	m.pinSet = make(map[string]bool, len(pins))
+	for _, p := range pins {
+		m.pinSet[p] = true
+	}
+	m.pinsLoaded = true
+	m.rebuild()
+}
+
+// mergePinnedRepos folds in pinned repos fetched individually because they fell
+// outside the scoped list, then refreshes.
+func (m *reposModel) mergePinnedRepos(repos []gh.Repo) {
+	have := make(map[string]bool, len(m.repos))
+	for _, r := range m.repos {
+		have[r.NameWithOwner] = true
+	}
+	for _, r := range repos {
+		if !have[r.NameWithOwner] {
+			m.repos = append(m.repos, r)
+		}
+	}
+	m.rebuild()
+}
+
+// missingPins returns pinned repos absent from the currently loaded set, so the
+// caller can fetch them individually.
+func (m *reposModel) missingPins() []string {
+	have := make(map[string]bool, len(m.repos))
+	for _, r := range m.repos {
+		have[r.NameWithOwner] = true
+	}
+	var missing []string
+	for _, p := range m.pins {
+		if !have[p] {
+			missing = append(missing, p)
+		}
+	}
+	return missing
+}
+
+// isPinned reports whether a repo is pinned.
+func (m *reposModel) isPinned(nameWithOwner string) bool { return m.pinSet[nameWithOwner] }
+
+// togglePin pins or unpins the selected repo and returns the new pin list (for
+// persistence) plus whether anything changed.
+func (m *reposModel) togglePin() ([]string, bool) {
+	r, ok := m.selected()
+	if !ok {
+		return m.pins, false
+	}
+	nwo := r.NameWithOwner
+	if m.pinSet[nwo] {
+		delete(m.pinSet, nwo)
+		out := m.pins[:0:0]
+		for _, p := range m.pins {
+			if p != nwo {
+				out = append(out, p)
+			}
+		}
+		m.pins = out
+	} else {
+		if m.pinSet == nil {
+			m.pinSet = map[string]bool{}
+		}
+		m.pinSet[nwo] = true
+		m.pins = append(m.pins, nwo)
+	}
+	m.rebuild()
+	return m.pins, true
 }
 
 // setReposFromCache shows cached data at startup. It is a no-op once fresh
@@ -140,22 +224,30 @@ func (m *reposModel) setLastCommitsFromCache(commits map[string]gh.LastCommit, s
 // beginAuthorScan marks a live re-scan as starting.
 func (m *reposModel) beginAuthorScan() { m.authorsScanning = true }
 
-// rebuild refreshes the table rows from the full repo set (the table applies
-// its own fuzzy filter on top).
+// rebuild refreshes the table rows from the loaded repo set: pinned repos are
+// listed first, then the rest by activity; in the scoped view only the top
+// scopedRepoLimit non-pinned repos are kept. The table applies its own fuzzy
+// filter on top.
 func (m *reposModel) rebuild() {
+	display := m.displayRepos()
 	muted := mutedStyleFor(m.theme)
-	rows := make([][]string, len(m.repos))
-	keys := make([][]string, len(m.repos))
-	ids := make([]string, len(m.repos))
-	for i, r := range m.repos {
+	rows := make([][]string, len(display))
+	keys := make([][]string, len(display))
+	ids := make([]string, len(display))
+	for i, r := range display {
 		vis := "public"
 		if r.IsPrivate {
 			vis = muted.Render("private")
 		}
+		pinned := m.isPinned(r.NameWithOwner)
+		name := r.NameWithOwner
+		if pinned {
+			name = pinStyle.Render("★ ") + name
+		}
 		vc := m.vulns[r.NameWithOwner]
 		lc := m.authors[r.NameWithOwner]
 		rows[i] = []string{
-			r.NameWithOwner, vis,
+			name, vis,
 			m.vulnCell(vc.Critical, colorRed, vc.Known),
 			m.vulnCell(vc.High, colorRed, vc.Known),
 			m.vulnCell(vc.Medium, colorAccent, vc.Known),
@@ -163,6 +255,8 @@ func (m *reposModel) rebuild() {
 			m.authorCell(lc),
 			humanizeTime(r.Activity()),
 		}
+		// Sort key: pinned repos sort ahead via a leading marker; the table's
+		// default (unsorted) order already places them first.
 		keys[i] = []string{
 			r.NameWithOwner, vis,
 			itoa(vc.Critical), itoa(vc.High), itoa(vc.Medium), itoa(vc.Low),
@@ -173,6 +267,26 @@ func (m *reposModel) rebuild() {
 	}
 	m.table.SetRows(rows, keys, ids)
 	m.table.SetSize(m.width, m.tableHeight())
+}
+
+// displayRepos returns the repos to show: pinned first (in activity order),
+// then the rest by activity. In the scoped view the non-pinned tail is capped
+// to scopedRepoLimit; "show all" keeps everything. m.repos is assumed to be in
+// activity order already (the fetch sorts it).
+func (m *reposModel) displayRepos() []gh.Repo {
+	pinned := make([]gh.Repo, 0, len(m.pins))
+	others := make([]gh.Repo, 0, len(m.repos))
+	for _, r := range m.repos {
+		if m.isPinned(r.NameWithOwner) {
+			pinned = append(pinned, r)
+		} else {
+			others = append(others, r)
+		}
+	}
+	if !m.showAll && len(others) > scopedRepoLimit {
+		others = others[:scopedRepoLimit]
+	}
+	return append(pinned, others...)
 }
 
 // vulnCell renders one severity count: "…" while scanning, "?" before any scan,
@@ -231,6 +345,10 @@ func (m *reposModel) snapshot() Snapshot {
 		msg = "scanning last committers…"
 	case m.refreshing:
 		msg = "refreshing…"
+	case m.showAll:
+		msg = "showing all repos"
+	default:
+		msg = "scoped to owner/collaborator (a: show all)"
 	}
 	items := -1
 	if !m.loading {
@@ -261,6 +379,8 @@ func (m *reposModel) helpSections() []helpSection {
 			{"n", "notifications inbox"},
 			{"v", "re-scan vulnerability counts (cached otherwise)"},
 			{"c", "re-scan last committers (cached otherwise)"},
+			{"*", "pin / unpin the selected repo (pinned repos always show)"},
+			{"a", "toggle showing all repos vs owner/collaborator only"},
 		},
 	}}
 }
@@ -275,7 +395,7 @@ func (m *reposModel) View() string {
 		return "" // root renders the spinner
 	}
 	return topLineFor(&m.table, m.width, m.theme,
-		"/ filter · enter open · p my PRs · n notifications · v scan vulns · c scan committers · ctrl+f refresh · ? help") +
+		"/ filter · enter open · p my PRs · n notifications · v scan vulns · c scan committers · * pin · a all · ctrl+f refresh · ? help") +
 		"\n\n" + m.table.View()
 }
 

@@ -26,7 +26,17 @@ func autoRefreshTickCmd() tea.Cmd {
 
 // --- Messages -------------------------------------------------------------
 
-type reposLoadedMsg struct{ repos []gh.Repo }
+type reposLoadedMsg struct {
+	repos []gh.Repo
+	all   bool // whether this is the full "show all" set or the scoped set
+}
+
+// pinsLoadedMsg carries the pinned repos ("owner/name") read from disk at startup.
+type pinsLoadedMsg struct{ pins []string }
+
+// pinnedReposLoadedMsg carries pinned repos fetched individually because they
+// fell outside the scoped list.
+type pinnedReposLoadedMsg struct{ repos []gh.Repo }
 
 // vulnsLoadedMsg carries freshly-scanned per-repo Dependabot alert counts.
 type vulnsLoadedMsg struct{ counts map[string]gh.VulnCounts }
@@ -229,14 +239,40 @@ func markAllNotifsReadCmd() tea.Cmd {
 	}
 }
 
-func loadReposCmd() tea.Cmd {
+func loadReposCmd(all bool) tea.Cmd {
 	return func() tea.Msg {
-		repos, err := gh.ListRepos(context.Background())
+		repos, err := gh.ListRepos(context.Background(), all)
 		if err != nil {
 			return errMsg{context: "loading repositories", err: err}
 		}
-		_ = cache.WriteRepos(repos) // best-effort write-through
-		return reposLoadedMsg{repos: repos}
+		if !all {
+			_ = cache.WriteRepos(repos) // cache only the scoped startup view
+		}
+		return reposLoadedMsg{repos: repos, all: all}
+	}
+}
+
+// loadPinsCmd reads the pinned-repo list from disk at startup.
+func loadPinsCmd() tea.Cmd {
+	return func() tea.Msg {
+		pins, _ := cache.ReadPins()
+		return pinsLoadedMsg{pins: pins}
+	}
+}
+
+// loadPinnedReposCmd fetches pinned repos individually (those missing from the
+// scoped list) so they always appear.
+func loadPinnedReposCmd(names []string) tea.Cmd {
+	return func() tea.Msg {
+		return pinnedReposLoadedMsg{repos: gh.GetRepos(context.Background(), names)}
+	}
+}
+
+// savePinsCmd persists the pinned-repo list (best effort, off the UI path).
+func savePinsCmd(pins []string) tea.Cmd {
+	return func() tea.Msg {
+		_ = cache.WritePins(pins)
+		return nil
 	}
 }
 

@@ -75,7 +75,8 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		loadUserCmd(),
 		loadReposCacheCmd(), // instant: show cached repos while the network loads
-		loadReposCmd(),
+		loadReposCmd(false), // scoped (owner/collaborator) set; 'a' shows all
+		loadPinsCmd(),       // pinned repos always show, regardless of scope
 		loadVulnsCacheCmd(),       // instant: show cached vulnerability counts ('v' re-scans)
 		loadLastCommitsCacheCmd(), // instant: show cached last committers ('c' re-scans)
 		m.spinner.Tick,
@@ -143,7 +144,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case reposLoadedMsg:
-		m.repos.setRepos(msg.repos)
+		m.repos.setRepos(msg.repos, msg.all)
+		return m, m.fetchMissingPinsCmd()
+
+	case pinsLoadedMsg:
+		m.repos.setPins(msg.pins)
+		return m, m.fetchMissingPinsCmd()
+
+	case pinnedReposLoadedMsg:
+		m.repos.mergePinnedRepos(msg.repos)
 		return m, nil
 
 	case reposCacheLoadedMsg:
@@ -471,17 +480,30 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case "n":
 				return m.openNotifs()
 			case "v":
-				if !m.repos.vulnsScanning && len(m.repos.repos) > 0 {
+				// Scan only the repos actually shown (scoped cap + pins), not the
+				// full fetched set - no point scanning repos you can't see.
+				if shown := m.repos.displayRepos(); !m.repos.vulnsScanning && len(shown) > 0 {
 					m.repos.beginVulnScan()
-					return m, loadVulnsCmd(m.repos.repos)
+					return m, loadVulnsCmd(shown)
 				}
 				return m, nil
 			case "c":
-				if !m.repos.authorsScanning && len(m.repos.repos) > 0 {
+				if shown := m.repos.displayRepos(); !m.repos.authorsScanning && len(shown) > 0 {
 					m.repos.beginAuthorScan()
-					return m, loadLastCommitsCmd(m.repos.repos)
+					return m, loadLastCommitsCmd(shown)
 				}
 				return m, nil
+			case "a":
+				// Toggle between the scoped set and the full org-inclusive set.
+				next := !m.repos.showAll
+				m.repos.loading = true
+				return m, tea.Batch(loadReposCmd(next), m.spinner.Tick)
+			case "*":
+				pins, changed := m.repos.togglePin()
+				if !changed {
+					return m, nil
+				}
+				return m, tea.Batch(savePinsCmd(pins), m.fetchMissingPinsCmd())
 			case "enter":
 				if repo, ok := m.repos.selected(); ok {
 					m.detail = newDetailModel(repo, m.login, m.login, m.theme)
@@ -686,6 +708,21 @@ func (m *Model) autoRefreshCmds() []tea.Cmd {
 	return nil
 }
 
+// fetchMissingPinsCmd loads any pinned repos absent from the current set (e.g.
+// org repos excluded by the scoped affiliation filter) so they always show. It
+// waits until both the live repo list and the pin list have loaded, and is a
+// no-op when nothing is missing.
+func (m *Model) fetchMissingPinsCmd() tea.Cmd {
+	if !m.repos.fresh || !m.repos.pinsLoaded {
+		return nil
+	}
+	missing := m.repos.missingPins()
+	if len(missing) == 0 {
+		return nil
+	}
+	return loadPinnedReposCmd(missing)
+}
+
 // startRefresh re-fetches the active screen's data, showing the spinner while
 // the request is in flight. Filter and sort selections are preserved because
 // the reload feeds the same view models, which re-apply them.
@@ -694,7 +731,7 @@ func (m *Model) startRefresh() tea.Cmd {
 	case screenRepos:
 		m.repos.loading = true
 		// Note: vuln counts are NOT refetched here - they stay cached until 'v'.
-		return tea.Batch(loadReposCmd(), m.spinner.Tick)
+		return tea.Batch(loadReposCmd(m.repos.showAll), m.spinner.Tick)
 	case screenDetail:
 		repo := m.detail.repo.NameWithOwner
 		m.detail.loadingPRs = true

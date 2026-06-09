@@ -12,7 +12,7 @@ import (
 // App identity shown in the top bar.
 const (
 	AppName = "Github - TUI"
-	Version = "v0.0.15" // empty or "dev" => render bare app name
+	Version = "v0.0.16" // empty or "dev" => render bare app name
 )
 
 // Fixed semantic colors — identical on light and dark backgrounds. Only the
@@ -79,6 +79,7 @@ var (
 	accentStyle = lipgloss.NewStyle().Foreground(colorAccent)
 	errorStyle  = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 	textStyle   = lipgloss.NewStyle().Foreground(colorText)
+	pinStyle    = lipgloss.NewStyle().Foreground(colorAccent) // ★ pinned-repo marker
 )
 
 // humanizeTime is the shared timestamp convention for item dates across the
