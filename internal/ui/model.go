@@ -76,7 +76,8 @@ func (m Model) Init() tea.Cmd {
 		loadUserCmd(),
 		loadReposCacheCmd(), // instant: show cached repos while the network loads
 		loadReposCmd(),
-		loadVulnsCacheCmd(), // instant: show cached vulnerability counts ('v' re-scans)
+		loadVulnsCacheCmd(),       // instant: show cached vulnerability counts ('v' re-scans)
+		loadLastCommitsCacheCmd(), // instant: show cached last committers ('c' re-scans)
 		m.spinner.Tick,
 		autoRefreshTickCmd(),
 	)
@@ -157,6 +158,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.repos.setVulnCountsFromCache(msg.counts, msg.savedAt)
 		return m, nil
 
+	case lastCommitsLoadedMsg:
+		m.repos.setLastCommits(msg.commits)
+		return m, nil
+
+	case lastCommitsCacheLoadedMsg:
+		m.repos.setLastCommitsFromCache(msg.commits, msg.savedAt)
+		return m, nil
+
 	case myPRsLoadedMsg:
 		m.myPRs.setData(msg.review, msg.authored)
 		return m, nil
@@ -196,6 +205,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case securityLoadedMsg:
 		if msg.repo == m.detail.repo.NameWithOwner {
 			m.detail.setSecurity(msg.alerts, msg.unavailable)
+		}
+		return m, nil
+
+	case commitsLoadedMsg:
+		if msg.repo == m.detail.repo.NameWithOwner {
+			m.detail.setCommits(msg.commits)
 		}
 		return m, nil
 
@@ -316,6 +331,9 @@ func (m *Model) applyErr(msg errMsg) {
 	case "loading vulnerabilities":
 		m.detail.loadingSec = false
 		m.detail.secErr = msg.err
+	case "loading commits":
+		m.detail.loadingCommits = false
+		m.detail.commitErr = msg.err
 	case "loading issue":
 		m.issueDetail.loading = false
 		m.issueDetail.err = msg.err
@@ -456,6 +474,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if !m.repos.vulnsScanning && len(m.repos.repos) > 0 {
 					m.repos.beginVulnScan()
 					return m, loadVulnsCmd(m.repos.repos)
+				}
+				return m, nil
+			case "c":
+				if !m.repos.authorsScanning && len(m.repos.repos) > 0 {
+					m.repos.beginAuthorScan()
+					return m, loadLastCommitsCmd(m.repos.repos)
 				}
 				return m, nil
 			case "enter":
@@ -677,12 +701,14 @@ func (m *Model) startRefresh() tea.Cmd {
 		m.detail.loadingRuns = true
 		m.detail.loadingIssues = true
 		m.detail.loadingSec = true
+		m.detail.loadingCommits = true
 		m.detail.prErr = nil
 		m.detail.runErr = nil
 		m.detail.issueErr = nil
 		m.detail.secErr = nil
+		m.detail.commitErr = nil
 		m.detail.secDisabled = false
-		return tea.Batch(loadPRsCmd(repo), loadRunsCmd(repo), loadIssuesCmd(repo), loadSecurityCmd(repo), m.spinner.Tick)
+		return tea.Batch(loadPRsCmd(repo), loadRunsCmd(repo), loadIssuesCmd(repo), loadSecurityCmd(repo), loadCommitsCmd(repo), m.spinner.Tick)
 	case screenRunDetail:
 		m.runDetail.loading = true
 		m.runDetail.err = nil

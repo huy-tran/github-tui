@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor/patch only).
 
+## v0.0.15
+- Per-repo **Commits tab**: recent commits on the default branch (SHA, message,
+  author, when), fuzzy-filterable and sortable; `ctrl+o` opens a commit on
+  github.com.
+- Repo list gains a **"Last by"** column showing who made each repo's most
+  recent default-branch commit, fetched via batched GraphQL across all repos,
+  cached to disk and re-scanned on demand with `c` (mirrors the `v` vuln scan).
+
 ## v0.0.14
 - Absolute timestamps now append the local zone abbreviation (e.g.
   `Jun 2, 14:30 AEST`) so the time is unambiguous.

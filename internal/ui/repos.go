@@ -19,6 +19,11 @@ type reposModel struct {
 	vulnsScanning bool                     // a live re-scan is in flight
 	vulnsAt       time.Time                // when the shown counts were produced
 
+	authors         map[string]gh.LastCommit // per-repo last committer (cached; rescanned on 'c')
+	authorsLoaded   bool                     // have last-committer info (from cache or a scan)
+	authorsScanning bool                     // a live re-scan is in flight
+	authorsAt       time.Time                // when the shown info was produced
+
 	loading    bool
 	lastLoaded time.Time
 	account    string
@@ -40,6 +45,7 @@ func newReposModel(theme Theme) reposModel {
 		{Title: "High", Align: lipgloss.Right, Sort: SortNumeric},
 		{Title: "Med", Align: lipgloss.Right, Sort: SortNumeric},
 		{Title: "Low", Align: lipgloss.Right, Sort: SortNumeric},
+		{Title: "Last by", Sort: SortString},
 		{Title: "Updated", Align: lipgloss.Right, Sort: SortTime},
 	}
 	t := NewDataTable(cols)
@@ -110,6 +116,30 @@ func (m *reposModel) setVulnCountsFromCache(counts map[string]gh.VulnCounts, sav
 // beginVulnScan marks a live re-scan as starting.
 func (m *reposModel) beginVulnScan() { m.vulnsScanning = true }
 
+// setLastCommits stores freshly-scanned last-committer info and refreshes rows.
+func (m *reposModel) setLastCommits(commits map[string]gh.LastCommit) {
+	m.authors = commits
+	m.authorsLoaded = true
+	m.authorsScanning = false
+	m.authorsAt = time.Now()
+	m.rebuild()
+}
+
+// setLastCommitsFromCache applies cached last-committer info at startup (no-op
+// if empty).
+func (m *reposModel) setLastCommitsFromCache(commits map[string]gh.LastCommit, savedAt time.Time) {
+	if len(commits) == 0 {
+		return
+	}
+	m.authors = commits
+	m.authorsLoaded = true
+	m.authorsAt = savedAt
+	m.rebuild()
+}
+
+// beginAuthorScan marks a live re-scan as starting.
+func (m *reposModel) beginAuthorScan() { m.authorsScanning = true }
+
 // rebuild refreshes the table rows from the full repo set (the table applies
 // its own fuzzy filter on top).
 func (m *reposModel) rebuild() {
@@ -123,17 +153,20 @@ func (m *reposModel) rebuild() {
 			vis = muted.Render("private")
 		}
 		vc := m.vulns[r.NameWithOwner]
+		lc := m.authors[r.NameWithOwner]
 		rows[i] = []string{
 			r.NameWithOwner, vis,
 			m.vulnCell(vc.Critical, colorRed, vc.Known),
 			m.vulnCell(vc.High, colorRed, vc.Known),
 			m.vulnCell(vc.Medium, colorAccent, vc.Known),
 			m.vulnCell(vc.Low, colorYellow, vc.Known),
+			m.authorCell(lc),
 			humanizeTime(r.Activity()),
 		}
 		keys[i] = []string{
 			r.NameWithOwner, vis,
 			itoa(vc.Critical), itoa(vc.High), itoa(vc.Medium), itoa(vc.Low),
+			lc.Author,
 			r.Activity().Format(sortTimeLayout),
 		}
 		ids[i] = r.NameWithOwner
@@ -159,6 +192,21 @@ func (m *reposModel) vulnCell(n int, color lipgloss.Color, known bool) string {
 	return lipgloss.NewStyle().Foreground(color).Bold(true).Render(itoa(n))
 }
 
+// authorCell renders the last committer: "…" while scanning, "?" before any
+// scan, a muted "-" when unknown, and the login/name otherwise.
+func (m *reposModel) authorCell(lc gh.LastCommit) string {
+	muted := mutedStyleFor(m.theme)
+	switch {
+	case m.authorsScanning:
+		return muted.Render("…")
+	case !m.authorsLoaded:
+		return muted.Render("?")
+	case !lc.Known || lc.Author == "":
+		return muted.Render("-")
+	}
+	return lc.Author
+}
+
 // selected returns the highlighted repo, resolving through the table id.
 func (m *reposModel) selected() (gh.Repo, bool) {
 	id := m.table.SelectedID()
@@ -179,6 +227,8 @@ func (m *reposModel) snapshot() Snapshot {
 		msg = "filter: " + m.table.filterInput.Value()
 	case m.vulnsScanning:
 		msg = "scanning vulnerabilities…"
+	case m.authorsScanning:
+		msg = "scanning last committers…"
 	case m.refreshing:
 		msg = "refreshing…"
 	}
@@ -210,6 +260,7 @@ func (m *reposModel) helpSections() []helpSection {
 			{"p", "my PRs dashboard"},
 			{"n", "notifications inbox"},
 			{"v", "re-scan vulnerability counts (cached otherwise)"},
+			{"c", "re-scan last committers (cached otherwise)"},
 		},
 	}}
 }
@@ -224,7 +275,7 @@ func (m *reposModel) View() string {
 		return "" // root renders the spinner
 	}
 	return topLineFor(&m.table, m.width, m.theme,
-		"/ filter · enter open · p my PRs · n notifications · v scan vulns · ctrl+f refresh · ? help") +
+		"/ filter · enter open · p my PRs · n notifications · v scan vulns · c scan committers · ctrl+f refresh · ? help") +
 		"\n\n" + m.table.View()
 }
 

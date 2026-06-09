@@ -19,9 +19,10 @@ const (
 	tabWorkflows
 	tabIssues
 	tabSecurity
+	tabCommits
 )
 
-var tabNames = []string{"PRs", "Workflows", "Issues", "Security"}
+var tabNames = []string{"PRs", "Workflows", "Issues", "Security", "Commits"}
 
 // detailHeaderLines is the fixed number of rows above the table (repo line,
 // tab bar, sub-header). Keeping it constant stops the table from shifting.
@@ -35,10 +36,11 @@ type detailModel struct {
 
 	active tab
 
-	prTable    DataTable
-	runTable   DataTable
-	issueTable DataTable
-	secTable   DataTable
+	prTable     DataTable
+	runTable    DataTable
+	issueTable  DataTable
+	secTable    DataTable
+	commitTable DataTable
 
 	dispatch dispatchModel // "run a workflow" form (Workflows tab)
 	flash    string        // transient note (e.g. workflow dispatched)
@@ -48,21 +50,25 @@ type detailModel struct {
 	issues        []gh.Issue
 	alerts        []gh.SecurityAlert
 	secUnavail    []string
+	commits       []gh.Commit
 	onlyMyReviews bool
 
-	loadingPRs    bool
-	loadingRuns   bool
-	loadingIssues bool
-	loadingSec    bool
-	prErr         error
-	runErr        error
-	issueErr      error
-	secErr        error
-	secDisabled   bool
-	prLoaded      time.Time
-	runLoaded     time.Time
-	issueLoaded   time.Time
-	secLoaded     time.Time
+	loadingPRs     bool
+	loadingRuns    bool
+	loadingIssues  bool
+	loadingSec     bool
+	loadingCommits bool
+	prErr          error
+	runErr         error
+	issueErr       error
+	secErr         error
+	commitErr      error
+	secDisabled    bool
+	prLoaded       time.Time
+	runLoaded      time.Time
+	issueLoaded    time.Time
+	secLoaded      time.Time
+	commitLoaded   time.Time
 
 	width  int
 	height int // body height (between title bar and footer)
@@ -97,6 +103,12 @@ func newDetailModel(repo gh.Repo, login, account string, theme Theme) detailMode
 		{Title: "Location", Sort: SortString},
 		{Title: "Created", Align: lipgloss.Right, Sort: SortTime},
 	}
+	commitCols := []Column{
+		{Title: "SHA", Sort: SortString},
+		{Title: "Message", Flex: true, Sort: SortString},
+		{Title: "Author", Sort: SortString},
+		{Title: "When", Align: lipgloss.Right, Sort: SortTime},
+	}
 	pt := NewDataTable(prCols)
 	pt.SetTheme(theme)
 	rt := NewDataTable(runCols)
@@ -107,23 +119,28 @@ func newDetailModel(repo gh.Repo, login, account string, theme Theme) detailMode
 	st := NewDataTable(secCols)
 	st.SetTheme(theme)
 	st.SetEmptyMessage("No open security alerts. ")
+	ct := NewDataTable(commitCols)
+	ct.SetTheme(theme)
+	ct.SetEmptyMessage("No commits found.")
 
 	return detailModel{
-		repo:          repo,
-		login:         login,
-		account:       account,
-		theme:         theme,
-		active:        tabPRs,
-		prTable:       pt,
-		runTable:      rt,
-		issueTable:    it,
-		secTable:      st,
-		dispatch:      newDispatchModel(theme),
-		onlyMyReviews: true,
-		loadingPRs:    true,
-		loadingRuns:   true,
-		loadingIssues: true,
-		loadingSec:    true,
+		repo:           repo,
+		login:          login,
+		account:        account,
+		theme:          theme,
+		active:         tabPRs,
+		prTable:        pt,
+		runTable:       rt,
+		issueTable:     it,
+		secTable:       st,
+		commitTable:    ct,
+		dispatch:       newDispatchModel(theme),
+		onlyMyReviews:  true,
+		loadingPRs:     true,
+		loadingRuns:    true,
+		loadingIssues:  true,
+		loadingSec:     true,
+		loadingCommits: true,
 	}
 }
 
@@ -133,6 +150,7 @@ func (m *detailModel) initCmd() tea.Cmd {
 		loadRunsCmd(m.repo.NameWithOwner),
 		loadIssuesCmd(m.repo.NameWithOwner),
 		loadSecurityCmd(m.repo.NameWithOwner),
+		loadCommitsCmd(m.repo.NameWithOwner),
 	)
 }
 
@@ -143,6 +161,7 @@ func (m *detailModel) setSize(w, bodyH int) {
 	m.runTable.SetSize(w, th)
 	m.issueTable.SetSize(w, th)
 	m.secTable.SetSize(w, th)
+	m.commitTable.SetSize(w, th)
 	m.dispatch.setSize(w, th)
 }
 
@@ -167,6 +186,8 @@ func (m *detailModel) activeTable() *DataTable {
 		return &m.issueTable
 	case tabSecurity:
 		return &m.secTable
+	case tabCommits:
+		return &m.commitTable
 	default:
 		return &m.runTable
 	}
@@ -308,6 +329,36 @@ func (m *detailModel) setSecurity(alerts []gh.SecurityAlert, unavailable []strin
 	m.secTable.SetSize(m.width, m.tableHeight())
 }
 
+func (m *detailModel) setCommits(commits []gh.Commit) {
+	m.commits = commits
+	m.loadingCommits = false
+	m.commitErr = nil
+	m.commitLoaded = time.Now()
+	m.rebuildCommits()
+}
+
+func (m *detailModel) rebuildCommits() {
+	muted := mutedStyleFor(m.theme)
+	rows := make([][]string, len(m.commits))
+	keys := make([][]string, len(m.commits))
+	ids := make([]string, len(m.commits))
+	for i, c := range m.commits {
+		author := c.Author
+		if author == "" {
+			author = muted.Render("-")
+		}
+		rows[i] = []string{
+			muted.Render(c.AbbrevSHA()), c.Message, author, humanizeTime(c.Date),
+		}
+		keys[i] = []string{
+			c.SHA, c.Message, c.Author, c.Date.Format(sortTimeLayout),
+		}
+		ids[i] = c.URL
+	}
+	m.commitTable.SetRows(rows, keys, ids)
+	m.commitTable.SetSize(m.width, m.tableHeight())
+}
+
 // securitySourceCell colors the alert source.
 func securitySourceCell(source string) string {
 	switch source {
@@ -344,6 +395,8 @@ func (m *detailModel) Loading() (bool, string) {
 		return m.loadingIssues, "issues"
 	case tabSecurity:
 		return m.loadingSec, "vulnerabilities"
+	case tabCommits:
+		return m.loadingCommits, "commits"
 	default:
 		return m.loadingRuns, "workflow runs"
 	}
@@ -368,6 +421,11 @@ func (m *detailModel) snapshot() Snapshot {
 			items = m.secTable.Len()
 		}
 		loaded = m.secLoaded
+	case tabCommits:
+		if !m.loadingCommits {
+			items = m.commitTable.Len()
+		}
+		loaded = m.commitLoaded
 	default:
 		if !m.loadingRuns {
 			items = m.runTable.Len()
@@ -419,6 +477,9 @@ func (m *detailModel) helpSections() []helpSection {
 		{title: "Security tab", keys: []helpKey{
 			{"ctrl+o", "open the advisory (Dependabot / code / secret)"},
 		}},
+		{title: "Commits tab", keys: []helpKey{
+			{"ctrl+o", "open the commit in browser"},
+		}},
 		{title: "Table", keys: []helpKey{
 			{"↑/k ↓/j", "move"},
 			{"pgup/pgdn", "page"},
@@ -460,6 +521,9 @@ func (m *detailModel) Update(msg tea.Msg) tea.Cmd {
 			case "4":
 				m.active = tabSecurity
 				return nil
+			case "5":
+				m.active = tabCommits
+				return nil
 			case "t":
 				if m.active == tabPRs {
 					m.onlyMyReviews = !m.onlyMyReviews
@@ -479,6 +543,9 @@ func (m *detailModel) Update(msg tea.Msg) tea.Cmd {
 					}
 				case tabSecurity:
 					// No drill-in screen for an alert; ctrl+o opens the advisory.
+					return nil
+				case tabCommits:
+					// No drill-in screen for a commit; ctrl+o opens it in browser.
 					return nil
 				default:
 					if pr, ok := m.selectedPR(); ok {
@@ -593,6 +660,8 @@ func (m *detailModel) subHeader() string {
 			line += "  (" + strings.Join(m.secUnavail, ", ") + " unavailable)"
 		}
 		return muted.Render(line)
+	case tabCommits:
+		return muted.Render(fmt.Sprintf("recent commits on default branch · %d shown · / filter · s sort · ctrl+o browser · ctrl+f refresh", m.commitTable.Len()))
 	default:
 		return muted.Render(fmt.Sprintf("recent runs · %d shown · enter details · r run workflow · / filter · ctrl+o browser · ctrl+f refresh", m.runTable.Len()))
 	}
@@ -626,8 +695,14 @@ func (m *detailModel) body() string {
 		return m.centered(errorStyle.Render("Failed to load vulnerabilities: " + m.secErr.Error()))
 	case m.active == tabSecurity && m.loadingSec:
 		return ""
-	default:
+	case m.active == tabSecurity:
 		return m.secTable.View()
+	case m.active == tabCommits && m.commitErr != nil:
+		return m.centered(errorStyle.Render("Failed to load commits: " + m.commitErr.Error()))
+	case m.active == tabCommits && m.loadingCommits:
+		return ""
+	default:
+		return m.commitTable.View()
 	}
 }
 

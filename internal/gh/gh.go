@@ -470,6 +470,82 @@ func RepoVulnCounts(ctx context.Context, repos []Repo) (map[string]VulnCounts, e
 	return out, nil
 }
 
+// LastCommit is the most recent commit on a repo's default branch. Known is
+// false when it couldn't be determined (no access, or an empty repo).
+type LastCommit struct {
+	Author string    // GitHub login when known, else the raw commit author name
+	Date   time.Time // when the commit was made
+	Known  bool
+}
+
+// RepoLastCommits returns the most recent default-branch commit per repo,
+// fetched in batched GraphQL requests (so hundreds of repos cost only a handful
+// of calls). Repos that error, are empty, or can't be read are simply omitted
+// from the map.
+func RepoLastCommits(ctx context.Context, repos []Repo) (map[string]LastCommit, error) {
+	out := make(map[string]LastCommit, len(repos))
+	const batch = 40
+	for start := 0; start < len(repos); start += batch {
+		end := min(start+batch, len(repos))
+		chunk := repos[start:end]
+
+		var b strings.Builder
+		b.WriteString("query {\n")
+		for i, r := range chunk {
+			owner, name, ok := strings.Cut(r.NameWithOwner, "/")
+			if !ok {
+				continue
+			}
+			fmt.Fprintf(&b, "a%d: repository(owner:%q, name:%q){ defaultBranchRef{ target{ ... on Commit{ history(first:1){ nodes{ committedDate author{ name user{ login } } } } } } } }\n", i, owner, name)
+		}
+		b.WriteString("}\n")
+
+		raw, err := run(ctx, "api", "graphql", "-f", "query="+b.String())
+		if err != nil {
+			continue // skip this batch; those repos stay unknown
+		}
+		var resp struct {
+			Data map[string]*struct {
+				DefaultBranchRef *struct {
+					Target *struct {
+						History struct {
+							Nodes []struct {
+								CommittedDate time.Time `json:"committedDate"`
+								Author        struct {
+									Name string `json:"name"`
+									User *struct {
+										Login string `json:"login"`
+									} `json:"user"`
+								} `json:"author"`
+							} `json:"nodes"`
+						} `json:"history"`
+					} `json:"target"`
+				} `json:"defaultBranchRef"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			continue
+		}
+		for i, r := range chunk {
+			node := resp.Data[fmt.Sprintf("a%d", i)]
+			if node == nil || node.DefaultBranchRef == nil || node.DefaultBranchRef.Target == nil {
+				continue
+			}
+			nodes := node.DefaultBranchRef.Target.History.Nodes
+			if len(nodes) == 0 {
+				continue
+			}
+			n := nodes[0]
+			author := n.Author.Name
+			if n.Author.User != nil && n.Author.User.Login != "" {
+				author = n.Author.User.Login
+			}
+			out[r.NameWithOwner] = LastCommit{Author: author, Date: n.CommittedDate, Known: true}
+		}
+	}
+	return out, nil
+}
+
 // ErrSecurityUnavailable means Dependabot alerts are disabled for the repo or
 // the token lacks access (a 403/404), as opposed to a real failure.
 var ErrSecurityUnavailable = errors.New("dependabot alerts unavailable")
@@ -857,6 +933,72 @@ func ListRuns(ctx context.Context, nameWithOwner string) ([]Run, error) {
 		return runs[i].CreatedAt.After(runs[j].CreatedAt)
 	})
 	return runs, nil
+}
+
+// Commit is a single commit on the repository's default branch.
+type Commit struct {
+	SHA     string    // full commit SHA
+	Message string    // first line (subject) of the commit message
+	Author  string    // GitHub login when known, else the raw commit author name
+	Date    time.Time // authored date
+	URL     string    // html_url to the commit on github.com
+}
+
+// AbbrevSHA returns the conventional 7-character short SHA.
+func (c Commit) AbbrevSHA() string {
+	if len(c.SHA) > 7 {
+		return c.SHA[:7]
+	}
+	return c.SHA
+}
+
+// apiCommit decodes the REST shape of /repos/{owner}/{repo}/commits.
+type apiCommit struct {
+	SHA    string `json:"sha"`
+	URL    string `json:"html_url"`
+	Commit struct {
+		Message string `json:"message"`
+		Author  struct {
+			Name string    `json:"name"`
+			Date time.Time `json:"date"`
+		} `json:"author"`
+	} `json:"commit"`
+	Author *user `json:"author"` // GitHub account; null for unmatched commits
+}
+
+// ListCommits returns recent commits on the repository's default branch,
+// newest first. It uses the REST endpoint because `gh` has no commit-list
+// subcommand; omitting the `sha` param makes GitHub use the default branch.
+func ListCommits(ctx context.Context, nameWithOwner string) ([]Commit, error) {
+	owner, name, ok := strings.Cut(nameWithOwner, "/")
+	if !ok {
+		return nil, fmt.Errorf("invalid repo %q", nameWithOwner)
+	}
+	var raw []apiCommit
+	err := runJSON(ctx, &raw,
+		"api", fmt.Sprintf("repos/%s/%s/commits?per_page=50", owner, name))
+	if err != nil {
+		return nil, err
+	}
+	commits := make([]Commit, len(raw))
+	for i, c := range raw {
+		author := c.Commit.Author.Name
+		if c.Author != nil && c.Author.Login != "" {
+			author = c.Author.Login
+		}
+		msg := c.Commit.Message
+		if nl := strings.IndexByte(msg, '\n'); nl >= 0 {
+			msg = msg[:nl]
+		}
+		commits[i] = Commit{
+			SHA:     c.SHA,
+			Message: strings.TrimSpace(msg),
+			Author:  author,
+			Date:    c.Commit.Author.Date,
+			URL:     c.URL,
+		}
+	}
+	return commits, nil
 }
 
 // Workflow is an Actions workflow definition (`gh workflow list`).

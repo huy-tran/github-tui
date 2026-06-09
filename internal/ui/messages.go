@@ -37,6 +37,16 @@ type vulnsCacheLoadedMsg struct {
 	savedAt time.Time
 }
 
+// lastCommitsLoadedMsg carries freshly-scanned per-repo last-committer info.
+type lastCommitsLoadedMsg struct{ commits map[string]gh.LastCommit }
+
+// lastCommitsCacheLoadedMsg carries cached last-committer info shown instantly
+// at startup.
+type lastCommitsCacheLoadedMsg struct {
+	commits map[string]gh.LastCommit
+	savedAt time.Time
+}
+
 // reposCacheLoadedMsg carries repositories read from the on-disk cache (shown
 // instantly at startup while the network fetch is in flight).
 type reposCacheLoadedMsg struct {
@@ -112,6 +122,11 @@ type openIssueMsg struct {
 type issuesLoadedMsg struct {
 	repo   string
 	issues []gh.Issue
+}
+
+type commitsLoadedMsg struct {
+	repo    string
+	commits []gh.Commit
 }
 
 type issueDetailLoadedMsg struct {
@@ -238,6 +253,31 @@ func loadVulnsCmd(repos []gh.Repo) tea.Cmd {
 	}
 }
 
+// loadLastCommitsCmd scans the most recent default-branch commit per repo and
+// writes the result through to the on-disk cache.
+func loadLastCommitsCmd(repos []gh.Repo) tea.Cmd {
+	return func() tea.Msg {
+		commits, err := gh.RepoLastCommits(context.Background(), repos)
+		if err != nil {
+			return lastCommitsLoadedMsg{commits: map[string]gh.LastCommit{}}
+		}
+		_ = cache.WriteLastCommits(commits)
+		return lastCommitsLoadedMsg{commits: commits}
+	}
+}
+
+// loadLastCommitsCacheCmd reads cached last-committer info from disk (a miss
+// yields empties).
+func loadLastCommitsCacheCmd() tea.Cmd {
+	return func() tea.Msg {
+		commits, savedAt, err := cache.ReadLastCommits()
+		if err != nil {
+			return lastCommitsCacheLoadedMsg{}
+		}
+		return lastCommitsCacheLoadedMsg{commits: commits, savedAt: savedAt}
+	}
+}
+
 // loadVulnsCacheCmd reads cached alert counts from disk (a miss yields empties).
 func loadVulnsCacheCmd() tea.Cmd {
 	return func() tea.Msg {
@@ -312,6 +352,16 @@ func loadIssuesCmd(repo string) tea.Cmd {
 			return errMsg{context: "loading issues", err: err}
 		}
 		return issuesLoadedMsg{repo: repo, issues: issues}
+	}
+}
+
+func loadCommitsCmd(repo string) tea.Cmd {
+	return func() tea.Msg {
+		commits, err := gh.ListCommits(context.Background(), repo)
+		if err != nil {
+			return errMsg{context: "loading commits", err: err}
+		}
+		return commitsLoadedMsg{repo: repo, commits: commits}
 	}
 }
 
