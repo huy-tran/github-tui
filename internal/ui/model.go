@@ -74,9 +74,9 @@ func New(theme Theme) Model {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		loadUserCmd(),
-		loadReposCacheCmd(), // instant: show cached repos while the network loads
-		loadReposCmd(false), // scoped (owner/collaborator) set; 'a' shows all
-		loadPinsCmd(),       // pinned repos always show, regardless of scope
+		loadReposCacheCmd(),       // instant: show cached repos while the network loads
+		loadReposCmd(false),       // scoped (owner/collaborator) set; 'a' shows all
+		loadPinsCmd(),             // pinned repos always show, regardless of scope
 		loadVulnsCacheCmd(),       // instant: show cached vulnerability counts ('v' re-scans)
 		loadLastCommitsCacheCmd(), // instant: show cached last committers ('c' re-scans)
 		m.spinner.Tick,
