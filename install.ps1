@@ -33,6 +33,17 @@ if (-not (Test-Path -LiteralPath $binDir)) {
 $target = Join-Path $binDir "$Name.exe"
 $repoExe = Join-Path $PSScriptRoot "$Name.exe"
 
+# 0. Verify formatting before building (mirrors the CI gofmt gate so release
+#    builds fail locally the same way).
+Write-Host "Checking gofmt..." -ForegroundColor Cyan
+$unformatted = @(gofmt -l . | Where-Object { $_ -ne '' })
+if ($unformatted.Count -gt 0) {
+    Write-Host "These files are not gofmt-ed:" -ForegroundColor Red
+    $unformatted | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+    throw "gofmt check failed - run 'gofmt -w .' to fix, then re-run .\install.ps1."
+}
+Write-Host "gofmt clean" -ForegroundColor Green
+
 # 1. Build the repo-local binary.
 Write-Host "Building $Name -> $repoExe" -ForegroundColor Cyan
 go build -o $repoExe .
