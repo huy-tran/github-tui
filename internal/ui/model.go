@@ -229,6 +229,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case dispatchInputsLoadedMsg:
+		if m.screen == screenDetail && msg.repo == m.detail.repo.NameWithOwner {
+			return m, m.detail.dispatch.setInputs(msg)
+		}
+		return m, nil
+
 	case dispatchDoneMsg:
 		if m.screen == screenDetail && msg.repo == m.detail.repo.NameWithOwner {
 			return m, m.detail.dispatchDone(msg.name, msg.err)

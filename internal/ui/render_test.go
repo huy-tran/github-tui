@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -1390,11 +1391,62 @@ func TestWorkflowDispatch(t *testing.T) {
 	assertLayout(t, out, w, h)
 	t.Log("\nDispatch (ref):\n" + stripANSI(out))
 
+	// enter reads the workflow's inputs first (fires a gh cmd).
+	nm, cmd = m.Update(key("enter"))
+	m = nm.(Model)
+	if cmd == nil || !m.detail.dispatch.loadingInputs {
+		t.Fatal("enter on the ref stage should load the workflow inputs")
+	}
+
+	// Inputs arrive: the form advances to the inputs stage with defaults set.
+	m = step(t, m, dispatchInputsLoadedMsg{repo: repo, workflowID: 20, ref: "main", inputs: []gh.WorkflowInput{
+		{Name: "environment", Description: "Target environment", Type: "choice", Default: "staging", Required: true, Options: []string{"staging", "production"}},
+		{Name: "dry_run", Type: "boolean", Default: "false"},
+		{Name: "version", Type: "string", Required: true},
+	}})
+	d := &m.detail.dispatch
+	if d.stage != dispatchInputs || len(d.fields) != 3 {
+		t.Fatalf("inputs should open the inputs stage with 3 fields, got stage=%v fields=%d", d.stage, len(d.fields))
+	}
+	out = m.View()
+	assertLayout(t, out, w, h)
+	t.Log("\nDispatch (inputs):\n" + stripANSI(out))
+
+	// Cycle the choice, toggle the boolean, type the string.
+	m = step(t, m, key("right"))
+	m = step(t, m, key("tab"))
+	m = step(t, m, key(" "))
+	m = step(t, m, key("tab"))
+	d = &m.detail.dispatch
+	if d.field != 2 {
+		t.Fatalf("tab should move focus to the third field, got %d", d.field)
+	}
+
+	// enter with a required field empty refuses to dispatch.
+	nm, cmd = m.Update(key("enter"))
+	m = nm.(Model)
+	d = &m.detail.dispatch
+	if d.working || !d.msgErr || !strings.Contains(d.msg, "version") {
+		t.Fatalf("empty required input should block dispatch, got working=%v msg=%q", d.working, d.msg)
+	}
+	for _, r := range "v1.2" {
+		m = step(t, m, key(string(r)))
+	}
+	d = &m.detail.dispatch
+	values, missing := d.inputValues()
+	if missing != "" {
+		t.Fatalf("no input should be missing, got %q", missing)
+	}
+	want := []gh.DispatchInput{{Name: "environment", Value: "production"}, {Name: "dry_run", Value: "true"}, {Name: "version", Value: "v1.2"}}
+	if !reflect.DeepEqual(values, want) {
+		t.Errorf("input values = %+v, want %+v", values, want)
+	}
+
 	// enter triggers the dispatch (fires a gh cmd, sets working).
 	nm, cmd = m.Update(key("enter"))
 	m = nm.(Model)
 	if cmd == nil || !m.detail.dispatch.working {
-		t.Fatal("enter on the ref stage should dispatch the workflow")
+		t.Fatal("enter on the inputs stage should dispatch the workflow")
 	}
 
 	// Success closes the form and flashes + reloads runs.
@@ -1415,8 +1467,13 @@ func TestWorkflowDispatch(t *testing.T) {
 	m2 := step(t, m, key("r"))
 	m2 = step(t, m2, dispatchInfoLoadedMsg{repo: repo, defaultBranch: "main", workflows: []gh.Workflow{{ID: 10, Name: "CI"}}})
 	m2 = step(t, m2, key("enter")) // -> ref stage
-	nm, _ = m2.Update(key("enter"))
+	m2 = step(t, m2, key("enter")) // -> loading inputs
+	// A workflow without inputs dispatches straight away.
+	nm, cmd = m2.Update(dispatchInputsLoadedMsg{repo: repo, workflowID: 10, ref: "main", inputs: []gh.WorkflowInput{}})
 	m2 = nm.(Model)
+	if cmd == nil || !m2.detail.dispatch.working {
+		t.Fatal("a workflow with no inputs should dispatch as soon as inputs load")
+	}
 	m2 = step(t, m2, dispatchDoneMsg{repo: repo, name: "CI", err: errFake("no workflow_dispatch trigger")})
 	if !m2.detail.dispatch.active || !m2.detail.dispatch.msgErr {
 		t.Error("a dispatch error should keep the form open and show the error")

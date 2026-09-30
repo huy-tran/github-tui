@@ -374,9 +374,28 @@ func loadDispatchInfoCmd(repo string) tea.Cmd {
 	}
 }
 
-func dispatchWorkflowCmd(repo string, id int64, name, ref string) tea.Cmd {
+// dispatchInputsLoadedMsg carries a workflow's workflow_dispatch inputs (read
+// from the workflow file at the chosen ref).
+type dispatchInputsLoadedMsg struct {
+	repo       string
+	workflowID int64
+	ref        string
+	inputs     []gh.WorkflowInput
+	err        error
+}
+
+// loadDispatchInputsCmd reads the workflow file at ref and extracts its
+// workflow_dispatch inputs.
+func loadDispatchInputsCmd(repo string, wf gh.Workflow, ref string) tea.Cmd {
 	return func() tea.Msg {
-		err := gh.DispatchWorkflow(context.Background(), repo, id, ref)
+		inputs, err := gh.WorkflowInputs(context.Background(), repo, wf.Path, ref)
+		return dispatchInputsLoadedMsg{repo: repo, workflowID: wf.ID, ref: ref, inputs: inputs, err: err}
+	}
+}
+
+func dispatchWorkflowCmd(repo string, id int64, name, ref string, inputs []gh.DispatchInput) tea.Cmd {
+	return func() tea.Msg {
+		err := gh.DispatchWorkflow(context.Background(), repo, id, ref, inputs)
 		return dispatchDoneMsg{repo: repo, name: name, err: err}
 	}
 }

@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor/patch only).
 
+## v0.0.17
+- **Workflow inputs** when triggering a run (`r`): the form now reads the
+  workflow file at the chosen ref and shows a field per `workflow_dispatch`
+  input - choice inputs cycle with `←/→`, booleans toggle with `space`, and
+  string/number/environment inputs are text fields. Defaults are pre-filled,
+  required inputs are starred and validated, and untouched optional inputs are
+  left to GitHub's defaults. Workflows without inputs run straight away as
+  before.
+
 ## v0.0.16
 - Repo list is now **scoped by default**: only repos you own or directly
   collaborate on, showing the 50 most recently active (plus any pinned). Avoids

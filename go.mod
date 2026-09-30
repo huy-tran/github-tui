@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/mattn/go-runewidth v0.0.19
 	github.com/sahilm/fuzzy v0.1.1
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

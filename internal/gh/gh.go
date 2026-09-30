@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Repo is a single repository from `gh repo list`.
@@ -1063,12 +1066,104 @@ func DefaultBranch(ctx context.Context, nameWithOwner string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// DispatchWorkflow triggers a workflow_dispatch run for a workflow on a ref.
-// Returns an error if the workflow has no workflow_dispatch trigger.
-func DispatchWorkflow(ctx context.Context, nameWithOwner string, workflowID int64, ref string) error {
+// WorkflowInput is one entry of a workflow's `on.workflow_dispatch.inputs`.
+type WorkflowInput struct {
+	Name        string
+	Description string
+	Type        string // string (default), choice, boolean, number, environment
+	Default     string // rendered as text; "" when unset
+	Required    bool
+	Options     []string // choice only
+}
+
+// DispatchInput is a name/value pair passed to `gh workflow run -f`.
+type DispatchInput struct {
+	Name  string
+	Value string
+}
+
+// WorkflowInputs fetches a workflow file at ref and returns its
+// workflow_dispatch inputs in declaration order. A workflow without inputs
+// yields an empty slice.
+func WorkflowInputs(ctx context.Context, nameWithOwner, path, ref string) ([]WorkflowInput, error) {
+	endpoint := "repos/" + nameWithOwner + "/contents/" + strings.TrimPrefix(path, "/")
+	if ref != "" {
+		endpoint += "?ref=" + url.QueryEscape(ref)
+	}
+	out, err := run(ctx, "api", "-H", "Accept: application/vnd.github.raw", endpoint)
+	if err != nil {
+		return nil, err
+	}
+	return ParseWorkflowInputs(out)
+}
+
+// ParseWorkflowInputs extracts `on.workflow_dispatch.inputs` from workflow
+// YAML, preserving declaration order.
+func ParseWorkflowInputs(src []byte) ([]WorkflowInput, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(src, &doc); err != nil {
+		return nil, fmt.Errorf("parsing workflow: %w", err)
+	}
+	root := &doc
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
+		root = root.Content[0]
+	}
+	inputs := mappingValue(mappingValue(mappingValue(root, "on"), "workflow_dispatch"), "inputs")
+	if inputs == nil || inputs.Kind != yaml.MappingNode {
+		return []WorkflowInput{}, nil
+	}
+
+	res := []WorkflowInput{}
+	for i := 0; i+1 < len(inputs.Content); i += 2 {
+		key, val := inputs.Content[i], inputs.Content[i+1]
+		in := WorkflowInput{Name: key.Value, Type: "string"}
+		if val.Kind == yaml.MappingNode {
+			var spec struct {
+				Description string   `yaml:"description"`
+				Type        string   `yaml:"type"`
+				Default     string   `yaml:"default"`
+				Required    bool     `yaml:"required"`
+				Options     []string `yaml:"options"`
+			}
+			if err := val.Decode(&spec); err != nil {
+				return nil, fmt.Errorf("parsing input %q: %w", key.Value, err)
+			}
+			in.Description = spec.Description
+			if spec.Type != "" {
+				in.Type = spec.Type
+			}
+			in.Default = spec.Default
+			in.Required = spec.Required
+			in.Options = spec.Options
+		}
+		res = append(res, in)
+	}
+	return res, nil
+}
+
+// mappingValue returns the value node for key in a mapping node, or nil.
+func mappingValue(n *yaml.Node, key string) *yaml.Node {
+	if n == nil || n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// DispatchWorkflow triggers a workflow_dispatch run for a workflow on a ref,
+// passing inputs as `-f name=value`. Returns an error if the workflow has no
+// workflow_dispatch trigger.
+func DispatchWorkflow(ctx context.Context, nameWithOwner string, workflowID int64, ref string, inputs []DispatchInput) error {
 	args := []string{"workflow", "run", strconv.FormatInt(workflowID, 10), "--repo", nameWithOwner}
 	if ref != "" {
 		args = append(args, "--ref", ref)
+	}
+	for _, in := range inputs {
+		args = append(args, "-f", in.Name+"="+in.Value)
 	}
 	_, err := run(ctx, args...)
 	return err

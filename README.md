@@ -35,7 +35,8 @@ without leaving the terminal.
     approve, request changes / comment, merge (commit/squash/rebase), close.
   - **Workflows** - recent Actions runs; drill into a run for jobs, steps, and
     logs; re-run or cancel; **trigger a workflow** (`r` - `workflow_dispatch` on
-    a chosen ref); **live auto-refresh** while a run is in progress.
+    a chosen ref, with a form for its inputs); **live auto-refresh** while a
+    run is in progress.
   - **Issues** - browse, read (body + comments), comment, and close.
   - **Security** - unified Dependabot + code-scanning + secret-scanning alerts.
 - **Command palette** (`ctrl+k`) - fuzzy "go to" any repo or screen.
@@ -122,8 +123,9 @@ The theme can also be set with the `GITHUB_TUI_THEME` environment variable.
   request-changes/comment, `ctrl+y` merge, `ctrl+x` close, `ctrl+o` browser.
 - **Workflows** - `enter` view a run's jobs/steps; `enter`/`ctrl+l` a job's logs;
   `ctrl+r` re-run, `ctrl+x` cancel; **`r`** trigger a `workflow_dispatch` workflow
-  (pick a workflow + ref). A `● live` footer badge shows auto-refresh while a run
-  is in progress.
+  (pick a workflow + ref, then fill any `workflow_dispatch` inputs: choice,
+  boolean, string, number and environment). A `● live` footer badge shows
+  auto-refresh while a run is in progress.
 - **Issues** - `enter` view detail; `ctrl+r` comment, `ctrl+x` close.
 - **Security** - open Dependabot / code-scanning / secret-scanning alerts,
   most severe first; `ctrl+o` opens the advisory. Always fetched live.
