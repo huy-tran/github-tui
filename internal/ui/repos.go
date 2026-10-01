@@ -9,9 +9,10 @@ import (
 	"github.com/huy-tran/github-tui/internal/gh"
 )
 
-// scopedRepoLimit caps how many non-pinned repos the scoped view keeps (the
-// most recently active ones). Pinned repos are always shown on top of this.
-const scopedRepoLimit = 50
+// recentRepoLimit caps how many non-pinned repos the default view keeps (the
+// most recently active ones), which bounds the cross-repo scans. Pinned repos
+// are always shown on top of this; 'a' lifts the cap.
+const recentRepoLimit = 50
 
 // reposModel is the first screen: a filterable, sortable repo table.
 type reposModel struct {
@@ -21,7 +22,7 @@ type reposModel struct {
 	pins       []string        // pinned "owner/name", in pin order (persisted)
 	pinSet     map[string]bool // membership lookup for pins
 	pinsLoaded bool            // pins have been read from disk
-	showAll    bool            // true => full org-inclusive set; false => scoped
+	showAll    bool            // true => every repo; false => the recentRepoLimit most active
 
 	vulns         map[string]gh.VulnCounts // per-repo alert counts (cached; rescanned on 'v')
 	vulnsLoaded   bool                     // have counts (from cache or a scan)
@@ -77,11 +78,9 @@ func (m *reposModel) tableHeight() int {
 	return m.height - 2
 }
 
-// setRepos applies authoritative network data. all reports whether this is the
-// full "show all" set (vs the scoped owner/collaborator set).
-func (m *reposModel) setRepos(repos []gh.Repo, all bool) {
+// setRepos applies authoritative network data (the full accessible set).
+func (m *reposModel) setRepos(repos []gh.Repo) {
 	m.repos = repos
-	m.showAll = all
 	m.loading = false
 	m.fresh = true
 	m.refreshing = false
@@ -100,8 +99,14 @@ func (m *reposModel) setPins(pins []string) {
 	m.rebuild()
 }
 
-// mergePinnedRepos folds in pinned repos fetched individually because they fell
-// outside the scoped list, then refreshes.
+// toggleShowAll switches between the recent-activity cap and the full set.
+func (m *reposModel) toggleShowAll() {
+	m.showAll = !m.showAll
+	m.rebuild()
+}
+
+// mergePinnedRepos folds in pinned repos fetched individually because they were
+// absent from the loaded list, then refreshes.
 func (m *reposModel) mergePinnedRepos(repos []gh.Repo) {
 	have := make(map[string]bool, len(m.repos))
 	for _, r := range m.repos {
@@ -225,8 +230,8 @@ func (m *reposModel) setLastCommitsFromCache(commits map[string]gh.LastCommit, s
 func (m *reposModel) beginAuthorScan() { m.authorsScanning = true }
 
 // rebuild refreshes the table rows from the loaded repo set: pinned repos are
-// listed first, then the rest by activity; in the scoped view only the top
-// scopedRepoLimit non-pinned repos are kept. The table applies its own fuzzy
+// listed first, then the rest by activity; under the default cap only the top
+// recentRepoLimit non-pinned repos are kept. The table applies its own fuzzy
 // filter on top.
 func (m *reposModel) rebuild() {
 	display := m.displayRepos()
@@ -270,8 +275,8 @@ func (m *reposModel) rebuild() {
 }
 
 // displayRepos returns the repos to show: pinned first (in activity order),
-// then the rest by activity. In the scoped view the non-pinned tail is capped
-// to scopedRepoLimit; "show all" keeps everything. m.repos is assumed to be in
+// then the rest by activity. Under the default cap the non-pinned tail is capped
+// to recentRepoLimit; "show all" keeps everything. m.repos is assumed to be in
 // activity order already (the fetch sorts it).
 func (m *reposModel) displayRepos() []gh.Repo {
 	pinned := make([]gh.Repo, 0, len(m.pins))
@@ -283,8 +288,8 @@ func (m *reposModel) displayRepos() []gh.Repo {
 			others = append(others, r)
 		}
 	}
-	if !m.showAll && len(others) > scopedRepoLimit {
-		others = others[:scopedRepoLimit]
+	if !m.showAll && len(others) > recentRepoLimit {
+		others = others[:recentRepoLimit]
 	}
 	return append(pinned, others...)
 }
@@ -348,7 +353,7 @@ func (m *reposModel) snapshot() Snapshot {
 	case m.showAll:
 		msg = "showing all repos"
 	default:
-		msg = "scoped to owner/collaborator (a: show all)"
+		msg = "recent " + itoa(recentRepoLimit) + " repos (a: show all)"
 	}
 	items := -1
 	if !m.loading {
@@ -380,7 +385,7 @@ func (m *reposModel) helpSections() []helpSection {
 			{"v", "re-scan vulnerability counts (cached otherwise)"},
 			{"c", "re-scan last committers (cached otherwise)"},
 			{"*", "pin / unpin the selected repo (pinned repos always show)"},
-			{"a", "toggle showing all repos vs owner/collaborator only"},
+			{"a", "toggle showing all repos vs the " + itoa(recentRepoLimit) + " most recently active"},
 		},
 	}}
 }

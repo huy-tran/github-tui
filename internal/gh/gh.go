@@ -277,28 +277,17 @@ type apiRepo struct {
 
 // ListRepos returns every repository the authenticated account can access -
 // owned, organization, and collaborator repos, public and private - sorted by
-// most recent push activity first.
+// most recent activity first, like the github.com dashboard.
 //
 // It uses the /user/repos API rather than `gh repo list` because the latter
-// only returns repositories owned by the account.
-// ListRepos returns accessible repositories, newest-push first.
-//
-// When all is false (the default scoped view) it fetches only repos you own or
-// directly collaborate on, a single page (no --paginate), which keeps the set
-// small and the cross-repo scans cheap. When all is true it returns every
-// accessible repo - owned, collaborator, and organization-member - across all
-// pages, for the "show all" discovery view.
-func ListRepos(ctx context.Context, all bool) ([]Repo, error) {
-	args := []string{"api"}
-	if all {
-		args = append(args, "--paginate",
-			"/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member&visibility=all")
-	} else {
-		args = append(args,
-			"/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator&visibility=all")
-	}
+// only returns repositories owned by the account. Access granted through an
+// org team (rather than as a direct collaborator) counts as
+// organization_member, so all three affiliations are requested.
+func ListRepos(ctx context.Context) ([]Repo, error) {
 	var apiRepos []apiRepo
-	if err := runJSON(ctx, &apiRepos, args...); err != nil {
+	if err := runJSON(ctx, &apiRepos, "api", "--paginate",
+		"/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member&visibility=all",
+	); err != nil {
 		return nil, err
 	}
 	repos := reposFromAPI(apiRepos)

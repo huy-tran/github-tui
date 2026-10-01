@@ -75,8 +75,8 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		loadUserCmd(),
 		loadReposCacheCmd(),       // instant: show cached repos while the network loads
-		loadReposCmd(false),       // scoped (owner/collaborator) set; 'a' shows all
-		loadPinsCmd(),             // pinned repos always show, regardless of scope
+		loadReposCmd(),            // every accessible repo; the view caps to the recent ones ('a' shows all)
+		loadPinsCmd(),             // pinned repos always show, regardless of the cap
 		loadVulnsCacheCmd(),       // instant: show cached vulnerability counts ('v' re-scans)
 		loadLastCommitsCacheCmd(), // instant: show cached last committers ('c' re-scans)
 		m.spinner.Tick,
@@ -144,7 +144,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case reposLoadedMsg:
-		m.repos.setRepos(msg.repos, msg.all)
+		m.repos.setRepos(msg.repos)
 		return m, m.fetchMissingPinsCmd()
 
 	case pinsLoadedMsg:
@@ -500,10 +500,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "a":
-				// Toggle between the scoped set and the full org-inclusive set.
-				next := !m.repos.showAll
-				m.repos.loading = true
-				return m, tea.Batch(loadReposCmd(next), m.spinner.Tick)
+				// Toggle between the recent-activity cap and the full set.
+				m.repos.toggleShowAll()
+				return m, nil
 			case "*":
 				pins, changed := m.repos.togglePin()
 				if !changed {
@@ -715,7 +714,7 @@ func (m *Model) autoRefreshCmds() []tea.Cmd {
 }
 
 // fetchMissingPinsCmd loads any pinned repos absent from the current set (e.g.
-// org repos excluded by the scoped affiliation filter) so they always show. It
+// a repo the API did not return) so they always show. It
 // waits until both the live repo list and the pin list have loaded, and is a
 // no-op when nothing is missing.
 func (m *Model) fetchMissingPinsCmd() tea.Cmd {
@@ -737,7 +736,7 @@ func (m *Model) startRefresh() tea.Cmd {
 	case screenRepos:
 		m.repos.loading = true
 		// Note: vuln counts are NOT refetched here - they stay cached until 'v'.
-		return tea.Batch(loadReposCmd(m.repos.showAll), m.spinner.Tick)
+		return tea.Batch(loadReposCmd(), m.spinner.Tick)
 	case screenDetail:
 		repo := m.detail.repo.NameWithOwner
 		m.detail.loadingPRs = true

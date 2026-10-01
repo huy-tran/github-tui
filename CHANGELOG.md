@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor/patch only).
 
+## v0.0.18
+- Repo list now shows **every repo you can access**, ordered by most recent
+  activity like the github.com dashboard - including repos granted through an
+  org team rather than as a direct collaborator. The default view still caps
+  at the 50 most recently active (plus pins) to keep the cross-repo scans
+  cheap; `a` now simply lifts that cap instead of refetching with a wider
+  affiliation filter.
+
 ## v0.0.17
 - **Workflow inputs** when triggering a run (`r`): the form now reads the
   workflow file at the chosen ref and shows a field per `workflow_dispatch`

@@ -23,9 +23,11 @@ without leaving the terminal.
 
 ## Features
 
-- **Repository list** - every repo you can access (owned, org, collaborator),
-  ordered by recent activity, with at-a-glance Dependabot alert counts per
-  severity. Cached to disk for instant startup.
+- **Repository list** - every repo you can access (owned, org, collaborator,
+  team-granted), ordered by most recent activity like the github.com dashboard,
+  with at-a-glance Dependabot alert counts per severity. Shows the 50 most
+  active by default (`a` shows all); pin favourites with `*`. Cached to disk
+  for instant startup.
 - **My PRs dashboard** - a cross-repo view of pull requests awaiting your review
   (and optionally ones you authored).
 - **Notifications inbox** - unread notifications across all repos, with filter,
@@ -115,6 +117,9 @@ The theme can also be set with the `GITHUB_TUI_THEME` environment variable.
 | `enter` | Open the repo detail |
 | `p` | My PRs dashboard · `n` Notifications inbox |
 | `v` | Re-scan the Dependabot alert columns (cached otherwise) |
+| `c` | Re-scan the "Last by" committer column (cached otherwise) |
+| `*` | Pin / unpin the selected repo (pinned repos always show, on top) |
+| `a` | Toggle between the 50 most recently active repos and every repo |
 
 ### Repo detail (tabbed: `1`/`2`/`3`/`4` or `tab`)
 

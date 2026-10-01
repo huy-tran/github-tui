@@ -1483,3 +1483,41 @@ func TestWorkflowDispatch(t *testing.T) {
 type errFake string
 
 func (e errFake) Error() string { return string(e) }
+
+func TestReposRecentCapToggle(t *testing.T) {
+	const w, h = 90, 24
+	now := time.Now()
+	repos := make([]gh.Repo, 0, recentRepoLimit+10)
+	for i := range recentRepoLimit + 10 {
+		name := "acme/repo-" + strconv.Itoa(i)
+		repos = append(repos, gh.Repo{Name: name, NameWithOwner: name, PushedAt: now.Add(-time.Duration(i) * time.Hour)})
+	}
+
+	m := New(darkTheme)
+	m = step(t, m, tea.WindowSizeMsg{Width: w, Height: h})
+	m = step(t, m, userLoadedMsg{login: "octocat"})
+	m = step(t, m, pinsLoadedMsg{pins: []string{"acme/repo-55"}}) // pinned, outside the cap
+	m = step(t, m, reposLoadedMsg{repos: repos})
+
+	// Default view: the cap plus the pinned repo, most recent first.
+	if got := m.repos.table.Len(); got != recentRepoLimit+1 {
+		t.Fatalf("default view should show %d repos, got %d", recentRepoLimit+1, got)
+	}
+	if shown := m.repos.displayRepos(); shown[0].NameWithOwner != "acme/repo-55" || shown[1].NameWithOwner != "acme/repo-0" {
+		t.Errorf("pinned repo should lead, then most recent; got %s, %s", shown[0].NameWithOwner, shown[1].NameWithOwner)
+	}
+
+	// 'a' lifts the cap without refetching; 'a' again restores it.
+	nm, cmd := m.Update(key("a"))
+	m = nm.(Model)
+	if cmd != nil {
+		t.Error("'a' should not trigger a network reload")
+	}
+	if got := m.repos.table.Len(); got != len(repos) {
+		t.Errorf("show-all should list every repo (%d), got %d", len(repos), got)
+	}
+	m = step(t, m, key("a"))
+	if got := m.repos.table.Len(); got != recentRepoLimit+1 {
+		t.Errorf("toggling back should restore the cap, got %d", got)
+	}
+}
