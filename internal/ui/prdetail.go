@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/huy-tran/github-tui/internal/gh"
 )
@@ -105,7 +106,8 @@ func (m *prDetailModel) setSize(w, bodyH int) {
 	m.vp.Width = w
 	m.vp.Height = m.vpHeight()
 	m.input.Width = maxInt(10, w-46) // leave room for label + submit hint
-	m.refreshContent()
+	// Re-wrap to the new width, keeping the scroll position.
+	m.rebuildContent()
 }
 
 func (m *prDetailModel) vpHeight() int {
@@ -133,8 +135,16 @@ func (m *prDetailModel) setDiff(diff string) {
 	}
 }
 
-// refreshContent rebuilds the viewport text for the active view.
+// refreshContent rebuilds the viewport text for the active view and scrolls
+// back to the top.
 func (m *prDetailModel) refreshContent() {
+	m.rebuildContent()
+	m.vp.SetYOffset(0)
+}
+
+// rebuildContent re-renders the active view at the current width without
+// touching the scroll position.
+func (m *prDetailModel) rebuildContent() {
 	m.vp.Width = m.width
 	m.vp.Height = m.vpHeight()
 	switch m.view {
@@ -145,7 +155,6 @@ func (m *prDetailModel) refreshContent() {
 	default:
 		m.vp.SetContent(m.renderInfo())
 	}
-	m.vp.SetYOffset(0)
 }
 
 func (m *prDetailModel) browserURL() string {
@@ -306,7 +315,7 @@ func (m *prDetailModel) renderConversation() string {
 		}
 		b.WriteString(e.head + "\n")
 		if e.body != "" {
-			b.WriteString(indentLines(hardWrap(e.body, maxInt(m.vp.Width-2, 10)), "  "))
+			b.WriteString(indentLines(wrapText(e.body, maxInt(m.vp.Width-2, 10)), "  "))
 			b.WriteString("\n")
 		}
 	}
@@ -752,6 +761,9 @@ func (m *prDetailModel) centered(s string) string {
 func (m *prDetailModel) renderInfo() string {
 	muted := mutedStyleFor(m.theme)
 	head := func(s string) string { return lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(s) }
+	w := maxInt(m.vp.Width, 10)
+	// item wraps a list entry and indents it, continuation lines included.
+	item := func(s string) string { return indentLines(wrapText(s, w-2), "  ") + "\n" }
 	var b strings.Builder
 
 	b.WriteString(head("Description"))
@@ -760,7 +772,7 @@ func (m *prDetailModel) renderInfo() string {
 	if body == "" {
 		b.WriteString(muted.Render("No description provided."))
 	} else {
-		b.WriteString(body)
+		b.WriteString(wrapText(body, w))
 	}
 	b.WriteString("\n\n")
 
@@ -771,7 +783,7 @@ func (m *prDetailModel) renderInfo() string {
 		b.WriteString(muted.Render("No status checks."))
 	} else {
 		for _, c := range m.detail.Checks {
-			b.WriteString("  " + checkIcon(c.Result()) + " " + c.DisplayName() + muted.Render("  "+c.Result()) + "\n")
+			b.WriteString(item(checkIcon(c.Result()) + " " + c.DisplayName() + muted.Render("  "+c.Result())))
 		}
 	}
 	b.WriteString("\n\n")
@@ -783,11 +795,11 @@ func (m *prDetailModel) renderInfo() string {
 		b.WriteString(muted.Render("No reviews yet."))
 	} else {
 		for _, r := range m.detail.Reviews {
-			line := "  " + reviewStateText(r.State) + " @" + r.Author.Login
+			line := reviewStateText(r.State) + " @" + r.Author.Login
 			if rb := strings.TrimSpace(r.Body); rb != "" {
 				line += muted.Render("  — " + firstLine(rb))
 			}
-			b.WriteString(line + "\n")
+			b.WriteString(item(line))
 		}
 	}
 	b.WriteString("\n")
@@ -801,7 +813,7 @@ func (m *prDetailModel) renderInfo() string {
 		for _, f := range m.detail.Files {
 			stat := lipgloss.NewStyle().Foreground(colorGreen).Render("+"+strconv.Itoa(f.Additions)) + " " +
 				lipgloss.NewStyle().Foreground(colorRed).Render("-"+strconv.Itoa(f.Deletions))
-			b.WriteString("  " + f.Path + muted.Render("  (") + stat + muted.Render(")") + "\n")
+			b.WriteString(item(f.Path + muted.Render("  (") + stat + muted.Render(")")))
 		}
 	}
 	return b.String()
@@ -817,8 +829,12 @@ func (m *prDetailModel) renderDiff() string {
 	hunk := lipgloss.NewStyle().Foreground(colorOverlay)
 	meta := lipgloss.NewStyle().Bold(true).Foreground(colorText)
 
+	w := maxInt(m.vp.Width, 10)
 	var b strings.Builder
 	for _, ln := range strings.Split(m.diff, "\n") {
+		// Hard-wrap long code lines (spaces kept) before styling, so every
+		// continuation row keeps the line's colour.
+		ln = ansi.Hardwrap(strings.ReplaceAll(strings.TrimRight(ln, "\r"), "\t", "    "), w, true)
 		switch {
 		case strings.HasPrefix(ln, "+++") || strings.HasPrefix(ln, "---"):
 			b.WriteString(meta.Render(ln))

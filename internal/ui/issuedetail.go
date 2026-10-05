@@ -295,7 +295,7 @@ func (m *issueDetailModel) centered(s string) string {
 func (m *issueDetailModel) renderBody() string {
 	muted := mutedStyleFor(m.theme)
 	head := func(s string) string { return lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(s) }
-	wrap := func(s string) string { return hardWrap(s, maxInt(m.vp.Width-2, 10)) }
+	wrap := func(s string) string { return wrapText(s, maxInt(m.vp.Width-2, 10)) }
 
 	var b strings.Builder
 	b.WriteString(head("Description") + "\n")

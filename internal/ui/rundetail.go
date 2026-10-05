@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/huy-tran/github-tui/internal/gh"
 )
@@ -478,6 +479,17 @@ func (m *runDetailModel) renderLog() string {
 
 func (m *runDetailModel) centered(s string) string {
 	return lipgloss.Place(maxInt(m.width, 1), m.bodyH(), lipgloss.Center, lipgloss.Center, s)
+}
+
+// wrapText word-wraps prose to width display cells (ANSI-aware), breaking
+// overlong words and normalising CRLF line endings and tabs.
+func wrapText(s string, width int) string {
+	if width < 1 {
+		width = 1
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\t", "    ")
+	return ansi.Wrap(s, width, "")
 }
 
 // hardWrap wraps each line of s to at most width runes.

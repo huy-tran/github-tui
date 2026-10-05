@@ -296,6 +296,49 @@ func openPRDetail(t *testing.T, w, h int) (Model, string) {
 	return m, repo
 }
 
+// TestPRDetailWrapsOnResize checks long description text word-wraps inside the
+// viewport and re-flows when the terminal is resized, keeping the scroll spot.
+func TestPRDetailWrapsOnResize(t *testing.T) {
+	const w, h = 100, 30
+	m, repo := openPRDetail(t, w, h)
+	word := "lorem "
+	body := strings.Repeat(word, 60) + "\r\n\r\nSecond paragraph " + strings.Repeat("x", 150)
+	m = step(t, m, prDetailLoadedMsg{repo: repo, number: 165, detail: gh.PRDetail{
+		Number: 165, Title: "Fix the thing", State: "OPEN", Body: body,
+		Files: []gh.ChangedFile{{Path: strings.Repeat("deep/", 30) + "file.go", Additions: 1}},
+	}})
+
+	for _, nw := range []int{100, 60, 40} {
+		m = step(t, m, tea.WindowSizeMsg{Width: nw, Height: h})
+		out := m.View()
+		assertLayout(t, out, nw, h)
+		content := stripANSI(m.prDetail.vp.View())
+		if !strings.Contains(content, "lorem lorem") {
+			t.Fatalf("width %d: description text missing:\n%s", nw, content)
+		}
+		if strings.Contains(content, "\r") {
+			t.Errorf("width %d: carriage return left in content", nw)
+		}
+		for i, ln := range strings.Split(content, "\n") {
+			if strings.HasSuffix(strings.TrimRight(ln, " "), "lore") {
+				t.Errorf("width %d: line %d splits a word: %q", nw, i, ln)
+			}
+		}
+	}
+
+	// Scroll down, resize: the offset survives the re-wrap.
+	m = step(t, m, key("j"))
+	m = step(t, m, key("j"))
+	before := m.prDetail.vp.YOffset
+	if before == 0 {
+		t.Fatal("expected to have scrolled")
+	}
+	m = step(t, m, tea.WindowSizeMsg{Width: 50, Height: h})
+	if m.prDetail.vp.YOffset != before {
+		t.Errorf("resize reset scroll: %d -> %d", before, m.prDetail.vp.YOffset)
+	}
+}
+
 func TestPRDetailRender(t *testing.T) {
 	const w, h = 100, 30
 	now := time.Now()

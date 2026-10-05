@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor/patch only).
 
+## v0.0.19
+- **Text wraps to the terminal width** on the PR detail screen and re-flows
+  when you resize. The description, checks, reviews and file list on Info now
+  word-wrap instead of being cut off; Conversation (and issue comments)
+  wrap at word boundaries instead of mid-word; long diff lines wrap and keep
+  their colour. Resizing keeps your scroll position.
+
 ## v0.0.18
 - Repo list now shows **every repo you can access**, ordered by most recent
   activity like the github.com dashboard - including repos granted through an
